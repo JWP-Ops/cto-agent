@@ -144,28 +144,34 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           path: target-repo
 
-      # ── Slow Path: Claude Code ──────────────────────────────────
+      # ── Apply Fix: Claude Code (pattern-guided or freeform) ─────
       - name: Claude Code auto-fix
-        if: steps.loop-guard.outputs.skip != 'true' && steps.patterns.outputs.matched != 'true'
+        if: steps.loop-guard.outputs.skip != 'true'
         id: claude-fix
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            You are the CTO Agent for StorScale. A CI workflow failed and no pattern matcher could fix it.
+            You are the CTO Agent for StorScale. A CI workflow failed and you need to fix it.
 
             Repository: ${{ inputs.repo }}
             Workflow: ${{ inputs.workflow_name }}
 
             Read the file combined-log.txt and annotations.txt in the parent directory for failure details.
+            Also read pattern-result.json for automated diagnosis (if available).
 
             YOUR TASK:
-            1. Diagnose the root cause of the CI failure
-            2. Write a minimal fix (max 5 files, max 100 lines changed)
-            3. Write a regression test that would catch this failure
-            4. Apply the fix
-            5. Do NOT modify .env files or hardcode secrets
-            6. Do NOT delete existing tests
+            1. Read the failure logs and pattern analysis
+            2. Apply a minimal fix (max 5 files, max 100 lines changed)
+            3. Write a regression test if appropriate
+            4. Do NOT modify .env files or hardcode secrets
+            5. Do NOT delete existing tests
+
+            COMMON FIXES:
+            - console.log/warn/error in production code → replace with logger.info/warn/error (import logger from shared/utils/logger)
+            - Env var name mismatch in tests → update test to use the name from the agent's config
+            - Secret scanner false positive → tighten the CI grep regex
+            - Broken require path → fix the relative path
 
             If you cannot fix this safely, create a file called ESCALATE.txt with the reason.
           working_directory: target-repo
