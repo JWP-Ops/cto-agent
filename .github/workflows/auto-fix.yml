@@ -37,6 +37,10 @@ jobs:
   auto-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
     steps:
       # ── Loop Guard ──────────────────────────────────────────────
       - name: Check for fix loop
@@ -174,9 +178,7 @@ jobs:
             - Broken require path → fix the relative path
 
             If you cannot fix this safely, create a file called ESCALATE.txt with the reason.
-          working_directory: target-repo
-          allowed_tools: 'Bash,Read,Write,Edit,Glob,Grep'
-          timeout_minutes: 10
+          claude_args: '--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 20'
 
       # ── Validate & Push Fix ─────────────────────────────────────
       - name: Validate and push fix
