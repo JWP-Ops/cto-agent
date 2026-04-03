@@ -178,7 +178,7 @@ jobs:
             - Broken require path → fix the relative path
 
             If you cannot fix this safely, create a file called ESCALATE.txt with the reason.
-          claude_args: '--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 20'
+          claude_args: '--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 50'
 
       # ── Validate & Push Fix ─────────────────────────────────────
       - name: Validate and push fix
