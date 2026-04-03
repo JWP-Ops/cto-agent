@@ -4,7 +4,7 @@ import { alertPlatformIssue } from '../slack.js';
 import { recordHealth } from '../health-api.js';
 
 interface AgentRunRow {
-  agent_id: string;
+  agent_slug: string;
   status: string;
   created_at: string;
 }
@@ -33,7 +33,7 @@ export async function pollAgentHealth(): Promise<void> {
 
     // Get recent agent runs
     const res = await fetch(
-      `${url}/rest/v1/agent_runs?select=agent_id,status,created_at&created_at=gte.${oneDayAgo}&order=created_at.desc&limit=500`,
+      `${url}/rest/v1/agent_runs?select=agent_slug,status,created_at&created_at=gte.${oneDayAgo}&order=created_at.desc&limit=500`,
       { headers }
     );
 
@@ -48,14 +48,14 @@ export async function pollAgentHealth(): Promise<void> {
     // Aggregate by agent
     const byAgent = new Map<string, { success: number; failure: number; total: number }>();
     for (const run of runs) {
-      const stats = byAgent.get(run.agent_id) || { success: 0, failure: 0, total: 0 };
+      const stats = byAgent.get(run.agent_slug) || { success: 0, failure: 0, total: 0 };
       stats.total++;
       if (run.status === 'success' || run.status === 'completed') {
         stats.success++;
       } else if (run.status === 'error' || run.status === 'failed') {
         stats.failure++;
       }
-      byAgent.set(run.agent_id, stats);
+      byAgent.set(run.agent_slug, stats);
     }
 
     // Flag agents with >25% failure rate
