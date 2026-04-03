@@ -1,4 +1,4 @@
-import { requireEnv } from './lib/env.js';
+import { optionalEnv } from './lib/env.js';
 import { log } from './lib/logger.js';
 
 // Rate limiting: max dispatches per repo per hour
@@ -28,7 +28,11 @@ export async function dispatchAutoFix(repo: string, runId: number, workflowName:
     return false;
   }
 
-  const token = requireEnv('GITHUB_PAT');
+  const token = optionalEnv('GITHUB_PAT');
+  if (!token) {
+    log('warn', 'GITHUB_PAT not set — cannot dispatch auto-fix');
+    return false;
+  }
 
   try {
     const res = await fetch(

@@ -1,4 +1,4 @@
-import { requireEnv } from './lib/env.js';
+import { optionalEnv } from './lib/env.js';
 import { log } from './lib/logger.js';
 
 interface GitHubRepo {
@@ -14,7 +14,11 @@ interface GitHubRepo {
  * Returns full_name format (e.g., "StorScale-AI/storscale-agents").
  */
 export async function discoverRepos(): Promise<string[]> {
-  const token = requireEnv('GITHUB_PAT');
+  const token = optionalEnv('GITHUB_PAT');
+  if (!token) {
+    log('warn', 'GITHUB_PAT not set — repo discovery disabled');
+    return [];
+  }
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
