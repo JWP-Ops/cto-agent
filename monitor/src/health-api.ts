@@ -92,3 +92,43 @@ healthRoutes.get('/health/platforms', (c) => {
     ],
   });
 });
+
+// GET /api/health/history/:platform?hours=24 — historical snapshots for sparklines
+healthRoutes.get('/health/history/:platform', async (c) => {
+  const platform = c.req.param('platform');
+  const hours = parseInt(c.req.query('hours') || '24', 10);
+  const { optionalEnv } = await import('./lib/env.js');
+
+  const url = optionalEnv('SUPABASE_URL');
+  const key = optionalEnv('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) {
+    return c.json({ error: 'Supabase not configured' }, 503);
+  }
+
+  const since = new Date(Date.now() - hours * 3600000).toISOString();
+  const res = await fetch(
+    `${url}/rest/v1/cto_agent_health_snapshots?platform=eq.${platform}&checked_at=gte.${since}&order=checked_at.asc&select=status,checked_at`,
+    {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+      },
+    }
+  );
+
+  if (!res.ok) {
+    return c.json({ error: `Query failed: ${res.status}` }, 500);
+  }
+
+  const snapshots = await res.json() as Array<{ status: string; checked_at: string }>;
+
+  // Map status to numeric for sparkline: healthy=1, warning=0.5, degraded=0.25, error=0
+  const statusValue: Record<string, number> = { healthy: 1, warning: 0.5, degraded: 0.25, error: 0 };
+  const points = snapshots.map(s => ({
+    time: s.checked_at,
+    value: statusValue[s.status] ?? 0,
+    status: s.status,
+  }));
+
+  return c.json({ platform, hours, points });
+});
