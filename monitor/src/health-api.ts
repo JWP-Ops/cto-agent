@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { insertHealthSnapshot } from './lib/supabase.js';
+import { log } from './lib/logger.js';
 
 type HealthStatus = 'healthy' | 'degraded' | 'warning' | 'error' | 'unknown';
 
@@ -16,12 +18,20 @@ const healthState = new Map<string, HealthRecord>();
  * Record a health check result. Called by each poller.
  */
 export function recordHealth(platform: string, data: Record<string, unknown>) {
+  const status = (data.status as HealthStatus) || 'unknown';
+  const checkedAt = (data.checked_at as string) || new Date().toISOString();
+
   healthState.set(platform, {
     platform,
-    status: (data.status as HealthStatus) || 'unknown',
+    status,
     details: data,
-    checked_at: (data.checked_at as string) || new Date().toISOString(),
+    checked_at: checkedAt,
   });
+
+  // Fire-and-forget persistence to Supabase
+  insertHealthSnapshot(platform, status, data, checkedAt).catch((err) =>
+    log('warn', `Supabase health snapshot insert failed: ${err}`)
+  );
 }
 
 /**

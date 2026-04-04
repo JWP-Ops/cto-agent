@@ -10,16 +10,21 @@ export async function pollVercel(): Promise<void> {
     return;
   }
 
+  const teamId = optionalEnv('VERCEL_TEAM_ID');
+
   const headers = {
     Authorization: `Bearer ${token}`,
   };
 
   try {
-    // List recent deployments
-    const res = await fetch(
-      'https://api.vercel.com/v6/deployments?limit=5&state=ERROR,READY',
-      { headers }
-    );
+    // List recent deployments — no state filter (comma-separated not supported by Vercel API)
+    const url = new URL('https://api.vercel.com/v6/deployments');
+    url.searchParams.set('limit', '5');
+    if (teamId) {
+      url.searchParams.set('teamId', teamId);
+    }
+
+    const res = await fetch(url.toString(), { headers });
 
     if (!res.ok) {
       log('warn', `Vercel API error: ${res.status}`);

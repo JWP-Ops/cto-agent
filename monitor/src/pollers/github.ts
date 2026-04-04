@@ -1,5 +1,6 @@
 import { requireEnv } from '../lib/env.js';
 import { log } from '../lib/logger.js';
+import { insertIncident } from '../lib/supabase.js';
 import { dispatchAutoFix } from '../dispatch.js';
 import { alertEscalation } from '../slack.js';
 import { recordHealth } from '../health-api.js';
@@ -68,10 +69,25 @@ export async function pollGitHub(repos: string[]): Promise<void> {
         failedCount++;
         failures.push(repo);
 
+        const detectedAt = new Date().toISOString();
+
         // Skip if it's a CTO agent fix attempt
         if (latestRun.head_commit?.message?.includes('[cto-fix]')) {
           log('warn', `Skipping ${repo} — last commit was a CTO fix attempt`);
           await alertEscalation(repo, 'CTO auto-fix failed — manual intervention needed', latestRun.html_url);
+
+          // Fire-and-forget incident persistence
+          insertIncident({
+            repo,
+            run_id: latestRun.id,
+            failure_type: 'ci_failure',
+            pattern_matched: 'cto-fix-retry',
+            fix_applied: false,
+            escalated: true,
+            escalation_reason: 'CTO auto-fix failed — manual intervention needed',
+            detected_at: detectedAt,
+          }).catch((err) => log('warn', `Supabase incident insert failed: ${err}`));
+
           continue;
         }
 
@@ -80,6 +96,17 @@ export async function pollGitHub(repos: string[]): Promise<void> {
         if (!dispatched) {
           await alertEscalation(repo, 'Could not dispatch auto-fix (rate limited or API error)', latestRun.html_url);
         }
+
+        // Fire-and-forget incident persistence
+        insertIncident({
+          repo,
+          run_id: latestRun.id,
+          failure_type: 'ci_failure',
+          fix_applied: dispatched ?? false,
+          escalated: !dispatched,
+          escalation_reason: dispatched ? undefined : 'Could not dispatch auto-fix',
+          detected_at: detectedAt,
+        }).catch((err) => log('warn', `Supabase incident insert failed: ${err}`));
       } else if (latestRun.conclusion === 'success') {
         healthyCount++;
       }
