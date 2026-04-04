@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { insertHealthSnapshot } from './lib/supabase.js';
 import { log } from './lib/logger.js';
+import { optionalEnv } from './lib/env.js';
 
 type HealthStatus = 'healthy' | 'degraded' | 'warning' | 'error' | 'unknown';
 
@@ -50,6 +51,23 @@ export function getAllHealth(): HealthRecord[] {
 
 // REST API routes (mounted at /api)
 export const healthRoutes = new Hono();
+
+// Bearer token auth middleware — protects all /api/* routes
+healthRoutes.use('*', async (c, next) => {
+  const expectedToken = optionalEnv('CTO_API_KEY');
+
+  // If CTO_API_KEY is not set, skip auth (open access for development)
+  if (!expectedToken) {
+    return next();
+  }
+
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || authHeader !== `Bearer ${expectedToken}`) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  return next();
+});
 
 // GET /api/health/summary — all platforms at a glance
 healthRoutes.get('/health/summary', (c) => {

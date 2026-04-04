@@ -119,6 +119,21 @@ async function startPollers() {
   ]);
 
   log('info', 'All pollers initialized');
+
+  // T1.6: External dead man's switch — ping every 5 min
+  // Configure HEALTHCHECK_PING_URL with Healthchecks.io, BetterStack, or UptimeRobot
+  const pingUrl = process.env.HEALTHCHECK_PING_URL;
+  if (pingUrl) {
+    const pingWatchdog = async () => {
+      try { await fetch(pingUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) }); }
+      catch { log('warn', 'Dead man switch ping failed'); }
+    };
+    setInterval(pingWatchdog, 5 * 60 * 1000);
+    pingWatchdog(); // Ping immediately on startup
+    log('info', 'External dead man switch configured');
+  } else {
+    log('warn', 'No HEALTHCHECK_PING_URL set — dead man switch disabled. Set up at healthchecks.io or betterstack.com');
+  }
 }
 
 const port = parseInt(process.env.PORT || '3002', 10);

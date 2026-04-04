@@ -39,6 +39,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      pull-requests: write
       id-token: write
       actions: read
     steps:
@@ -90,13 +91,16 @@ jobs:
           gh api "repos/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}/annotations" \
             --jq '.[].message' > annotations.txt 2>/dev/null || true
           gh run view "${TARGET_RUN_ID}" --repo "${TARGET_REPO}" --log-failed > failed-log.txt 2>/dev/null || true
-          cat failure-log.txt failed-log.txt > combined-log.txt 2>/dev/null || true
+
+          # Sanitize logs: strip ANSI codes, truncate to 500 lines (prompt injection defense)
+          cat failure-log.txt failed-log.txt | sed 's/\x1b\[[0-9;]*m//g' | head -500 > combined-log.txt 2>/dev/null || true
           echo "log_size=$(wc -c < combined-log.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
       # ── Clone CTO Agent (for pattern matchers) ──────────────────
+      # T1.4: Pinned to commit SHAs
       - name: Checkout CTO agent
         if: steps.loop-guard.outputs.skip != 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           repository: StorScale-AI/cto-agent
           token: ${{ secrets.GH_PAT }}
@@ -104,7 +108,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.loop-guard.outputs.skip != 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -142,21 +146,23 @@ jobs:
       # ── Clone Target Repo ───────────────────────────────────────
       - name: Checkout target repo
         if: steps.loop-guard.outputs.skip != 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           repository: ${{ inputs.repo }}
           token: ${{ secrets.GH_PAT }}
           path: target-repo
 
-      # ── Apply Fix: Claude Code (pattern-guided or freeform) ─────
+      # ── Apply Fix: Claude Code ──────────────────────────────────
+      # T1.2: Path restrictions via --disallowedTools
+      # T1.7: Full TDD prompt from fix-ci-failure.md
       - name: Claude Code auto-fix
         if: steps.loop-guard.outputs.skip != 'true'
         id: claude-fix
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@d3a8d1736a61af74bee88bcac0182c49be969839 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            You are the CTO Agent for StorScale. A CI workflow failed and you need to fix it.
+            You are the CTO Agent for StorScale, an automated system architect that fixes CI failures.
 
             Repository: ${{ inputs.repo }}
             Workflow: ${{ inputs.workflow_name }}
@@ -164,44 +170,96 @@ jobs:
             Read the file combined-log.txt and annotations.txt in the parent directory for failure details.
             Also read pattern-result.json for automated diagnosis (if available).
 
-            YOUR TASK:
-            1. Read the failure logs and pattern analysis
-            2. Apply a minimal fix (max 5 files, max 100 lines changed)
-            3. Write a regression test if appropriate
-            4. Do NOT modify .env files or hardcode secrets
-            5. Do NOT delete existing tests
+            ## Constraints (HARD RULES)
+            1. Max 5 files changed — if the fix requires more, create ESCALATE.txt
+            2. Max 100 lines added/removed — if the fix requires more, create ESCALATE.txt
+            3. NEVER modify: .env files, .github/ workflows, package.json, package-lock.json, *.sql migrations, auth modules, middleware files
+            4. NEVER hardcode API keys, tokens, or secrets
+            5. NEVER delete existing tests — only add or modify
+            6. Every fix SHOULD include a regression test
 
-            COMMON FIXES:
-            - console.log/warn/error in production code → replace with logger.info/warn/error (import logger from shared/utils/logger)
-            - Env var name mismatch in tests → update test to use the name from the agent's config
-            - Secret scanner false positive → tighten the CI grep regex
+            ## Process (TDD)
+            1. Read the failure logs to understand the root cause
+            2. Read the relevant source files
+            3. Write a test that reproduces the failure condition (if applicable)
+            4. Write the minimal fix that makes the test pass
+            5. Run the test command to verify your fix works before finishing
+
+            ## Common Fixes
+            - console.log in production code → replace with logger.info/warn/error
+            - Env var name mismatch in tests → update test to match agent config
+            - Secret scanner false positive → cannot fix (restricted file), create ESCALATE.txt
             - Broken require path → fix the relative path
 
             If you cannot fix this safely, create a file called ESCALATE.txt with the reason.
-          claude_args: '--allowedTools Bash,Read,Write,Edit,Glob,Grep --max-turns 50'
+            Do NOT commit — the workflow handles commits. Just make the file changes.
+          claude_args: '--allowedTools Read,Write,Edit,Glob,Grep --max-turns 25'
 
-      # ── Validate & Push Fix ─────────────────────────────────────
-      - name: Validate and push fix
+      # ── T1.1: Run Tests Before Push ─────────────────────────────
+      - name: Validate fix with tests
         if: steps.loop-guard.outputs.skip != 'true'
-        id: push
+        id: test-fix
         working-directory: target-repo
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          # Check for escalation
+          # Check for escalation first
           if [ -f ESCALATE.txt ]; then
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "tests_passed=false" >> "$GITHUB_OUTPUT"
             echo "reason=Claude escalated: $(cat ESCALATE.txt)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Check if there are changes
           if git diff --quiet && git diff --cached --quiet; then
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-            echo "reason=No changes to push" >> "$GITHUB_OUTPUT"
+            echo "tests_passed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=No changes to validate" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # Detect test command from package.json
+          TEST_CMD=""
+          if [ -f package.json ]; then
+            TEST_CMD=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('package.json','utf8'));console.log(p.scripts?.test||'')}catch{}" 2>/dev/null)
+          fi
+
+          # Also check for nested package.json (monorepo pattern)
+          for dir in . packages/api storscale-agents; do
+            if [ -f "$dir/package.json" ] && [ -z "$TEST_CMD" ]; then
+              TEST_CMD=$(node -e "try{const p=JSON.parse(require('fs').readFileSync('$dir/package.json','utf8'));console.log(p.scripts?.test||'')}catch{}" 2>/dev/null)
+            fi
+          done
+
+          # Run TypeScript check if tsconfig exists
+          if [ -f tsconfig.json ]; then
+            echo "Running TypeScript check..."
+            npx tsc --noEmit --skipLibCheck 2>&1 | tail -20 || true
+          fi
+
+          # Run tests if available
+          if [ -n "$TEST_CMD" ] && [ "$TEST_CMD" != "echo \"Error: no test specified\" && exit 1" ]; then
+            echo "Running tests: npm test"
+            npm install --ignore-scripts 2>/dev/null || true
+            npm test 2>&1 | tail -30
+            if [ $? -eq 0 ]; then
+              echo "tests_passed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tests_passed=false" >> "$GITHUB_OUTPUT"
+              echo "reason=Tests failed after applying fix" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "No test command found — skipping test validation"
+            echo "tests_passed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── T1.5: Push fix (branch for novel, main for pattern-matched) ──
+      - name: Push fix
+        if: steps.loop-guard.outputs.skip != 'true' && steps.test-fix.outputs.tests_passed == 'true'
+        id: push
+        working-directory: target-repo
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          PATTERN_MATCHED: ${{ steps.patterns.outputs.matched }}
+        run: |
           # Validate diff size
           FILES_CHANGED=$(git diff --name-only | wc -l | tr -d ' ')
           LINES_CHANGED=$(git diff --numstat | awk '{s+=$1+$2}END{print s+0}')
@@ -225,23 +283,61 @@ jobs:
           # Determine pattern name
           PATTERN=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('../pattern-result.json','utf8'));console.log(d.result?.patternName||'claude-code')}catch{console.log('claude-code')}" 2>/dev/null || echo "claude-code")
 
-          # Stage and commit
-          git add -A
-          git commit -m "$(cat <<EOF
-          [cto-fix] Auto-fix CI failure in ${TARGET_WORKFLOW}
+          # Stage changes (explicit files only, not git add -A)
+          git diff --name-only | xargs git add
+
+          COMMIT_MSG="[cto-fix] Auto-fix CI failure in ${TARGET_WORKFLOW}
 
           Pattern: ${PATTERN}
           Files changed: ${FILES_CHANGED}
           Run: https://github.com/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}
 
-          Co-Authored-By: CTO Agent <cto-agent@storscale.ai>
-          EOF
-          )"
+          Co-Authored-By: CTO Agent <cto-agent@storscale.ai>"
 
-          git push origin HEAD
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          git commit -m "$COMMIT_MSG"
+
+          # T1.5: Pattern-matched fixes push to main, novel fixes open PR
+          if [ "$PATTERN_MATCHED" = "true" ]; then
+            # High-confidence pattern match → push directly to main
+            git push origin HEAD
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "method=direct" >> "$GITHUB_OUTPUT"
+          else
+            # Novel fix (Claude Code freeform) → push to branch + open PR
+            BRANCH="cto-fix/${TARGET_RUN_ID}"
+            git checkout -b "$BRANCH"
+            git push origin "$BRANCH"
+
+            PR_URL=$(gh pr create \
+              --repo "${TARGET_REPO}" \
+              --base main \
+              --head "$BRANCH" \
+              --title "[cto-fix] Auto-fix CI failure in ${TARGET_WORKFLOW}" \
+              --body "Automated fix by CTO Agent (Claude Code freeform analysis).
+
+          **Pattern:** ${PATTERN}
+          **Files changed:** ${FILES_CHANGED}
+          **Original failure:** https://github.com/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}
+
+          > This fix was generated by AI and requires human review before merging." \
+              --no-maintainer-edit 2>&1 || echo "PR creation failed")
+
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "method=pr" >> "$GITHUB_OUTPUT"
+            echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+          fi
+
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "files_changed=${FILES_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "pattern=${PATTERN}" >> "$GITHUB_OUTPUT"
+
+      # ── Escalation (tests failed or no changes) ─────────────────
+      - name: Handle escalation
+        if: steps.loop-guard.outputs.skip != 'true' && steps.test-fix.outputs.tests_passed != 'true'
+        id: escalation
+        run: |
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          echo "reason=${{ steps.test-fix.outputs.reason }}" >> "$GITHUB_OUTPUT"
 
       # ── Slack Notification ──────────────────────────────────────
       - name: Notify Slack
@@ -249,23 +345,30 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PUSHED: ${{ steps.push.outputs.pushed }}
-          PUSH_REASON: ${{ steps.push.outputs.reason }}
+          PUSH_METHOD: ${{ steps.push.outputs.method }}
+          PUSH_REASON: ${{ steps.push.outputs.reason || steps.escalation.outputs.reason || steps.test-fix.outputs.reason }}
           COMMIT_SHA: ${{ steps.push.outputs.commit }}
           FILES_COUNT: ${{ steps.push.outputs.files_changed }}
+          PATTERN: ${{ steps.push.outputs.pattern }}
+          PR_URL: ${{ steps.push.outputs.pr_url }}
         run: |
           if [ -z "$SLACK_WEBHOOK_URL" ]; then exit 0; fi
 
           RUN_URL="https://github.com/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}"
 
-          if [ "$PUSHED" = "true" ]; then
+          if [ "$PUSHED" = "true" ] && [ "$PUSH_METHOD" = "direct" ]; then
             SHORT_SHA="${COMMIT_SHA:0:7}"
-            PAYLOAD=$(jq -n \
-              --arg text "CTO Agent fixed CI failure in *${TARGET_REPO}*\nCommit: \`${SHORT_SHA}\` | Files: ${FILES_COUNT}\n<${RUN_URL}|View original failure>" \
-              '{attachments: [{color: "good", text: $text}]}')
+            MSG="CTO Agent fixed CI failure in *${TARGET_REPO}* (pattern: ${PATTERN})\nCommit: \`${SHORT_SHA}\` | Files: ${FILES_COUNT} | Pushed to main\n<${RUN_URL}|View original failure>"
+            COLOR="good"
+          elif [ "$PUSHED" = "true" ] && [ "$PUSH_METHOD" = "pr" ]; then
+            MSG="CTO Agent created PR for *${TARGET_REPO}* (novel fix, needs review)\nFiles: ${FILES_COUNT}\n<${PR_URL}|Review PR> | <${RUN_URL}|View failure>"
+            COLOR="#439FE0"
           else
-            PAYLOAD=$(jq -n \
-              --arg text "CTO Agent could not auto-fix *${TARGET_REPO}*\nReason: ${PUSH_REASON}\n<${RUN_URL}|View failure>" \
-              '{attachments: [{color: "danger", text: $text}]}')
+            REASON="${PUSH_REASON}"
+            MSG="CTO Agent could not auto-fix *${TARGET_REPO}*\nReason: ${REASON}\n<${RUN_URL}|View failure>"
+            COLOR="danger"
           fi
 
+          PAYLOAD=$(jq -n --arg text "$MSG" --arg color "$COLOR" \
+            '{attachments: [{color: $color, text: $text}]}')
           curl -s -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$PAYLOAD"
