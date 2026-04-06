@@ -22,7 +22,7 @@ permissions:
 jobs:
   auto-fix:
     if: github.event.workflow_run.conclusion == 'failure'
-    uses: StorScale-AI/cto-agent/.github/workflows/auto-fix.yml@main
+    uses: JWP-Ops/cto-agent/.github/workflows/auto-fix.yml@main
     with:
       repo: ${{ github.repository }}
       run_id: ${{ github.event.workflow_run.id }}
