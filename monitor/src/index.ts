@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { discoverRepos } from './discovery.js';
 import { pollGitHub, loadSeenRuns } from './pollers/github.js';
@@ -20,6 +21,12 @@ import { initSentry } from './lib/sentry.js';
 import { sendWeeklyDigest } from './weekly-digest.js';
 
 const app = new Hono();
+
+app.use('/api/*', cors({
+  origin: ['https://app.storscale.ai', 'http://localhost:5173'],
+  allowHeaders: ['Authorization', 'Content-Type'],
+  allowMethods: ['GET'],
+}));
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', service: 'cto-agent-monitor', uptime: process.uptime() }));
