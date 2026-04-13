@@ -14,8 +14,10 @@ import { pollSelfHealth } from './pollers/self-health.js';
 import { pollAirtable } from './pollers/airtable.js';
 import { pollAttio } from './pollers/attio.js';
 import { pollLiveness } from './pollers/liveness.js';
+import { createSentryPoller } from './pollers/sentry.js';
 import { healthRoutes } from './health-api.js';
 import { loadDispatchState } from './dispatch.js';
+import { Dispatcher } from './lib/dispatch-v2.js';
 import { log, setCorrelationId } from './lib/logger.js';
 import { initSentry } from './lib/sentry.js';
 import { sendWeeklyDigest } from './weekly-digest.js';
@@ -50,6 +52,7 @@ const POLL_INTERVALS = {
   airtable: 5 * 60 * 1000,      // 5 min
   attio: 5 * 60 * 1000,          // 5 min
   liveness: 2 * 60 * 1000,       // 2 min
+  sentry: 10 * 60 * 1000,        // 10 min
 };
 
 // T4.30: Track intervals for graceful shutdown
@@ -60,6 +63,9 @@ async function startPollers() {
   initSentry();
 
   log('info', 'Starting CTO Agent Monitor');
+
+  // Dispatcher instance shared by v2 pollers (rate-limited, dedup-aware)
+  const dispatcher = new Dispatcher();
 
   // T2.10: Load persisted state from Supabase before polling
   await Promise.allSettled([
@@ -155,6 +161,14 @@ async function startPollers() {
     catch (e) { log('error', `Liveness poller failed: ${e}`); }
   }, POLL_INTERVALS.liveness));
 
+  // Sentry issue poller — dispatches auto-fix for unresolved production errors
+  const sentryPoller = createSentryPoller(dispatcher);
+  intervalIds.push(setInterval(async () => {
+    setCorrelationId();
+    try { await sentryPoller(); }
+    catch (e) { log('error', `Sentry poller failed: ${e}`); }
+  }, POLL_INTERVALS.sentry));
+
   // Repo discovery refresh
   intervalIds.push(setInterval(async () => {
     setCorrelationId();
@@ -185,6 +199,7 @@ async function startPollers() {
     pollAirtable(),
     pollAttio(),
     pollLiveness(),
+    sentryPoller(),
   ]);
 
   log('info', 'All pollers initialized');
