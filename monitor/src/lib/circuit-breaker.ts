@@ -31,7 +31,7 @@ export class CircuitBreaker {
       return result;
     } catch (err) {
       this.failures++;
-      if (this.failures >= this.opts.threshold) {
+      if (this.state === 'half-open' || this.failures >= this.opts.threshold) {
         this.state = 'open';
         this.openedAt = Date.now();
       }
@@ -39,6 +39,11 @@ export class CircuitBreaker {
     }
   }
 
+  /**
+   * Returns true when the circuit is open (calls will be blocked).
+   * Note: the half-open state transition is lazy — this returns true
+   * even after resetMs has elapsed until the next call() attempt.
+   */
   isOpen(): boolean {
     return this.state === 'open';
   }

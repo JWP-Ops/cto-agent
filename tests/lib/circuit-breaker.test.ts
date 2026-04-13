@@ -84,6 +84,26 @@ describe('CircuitBreaker', () => {
     await expect(cb.call(anotherFn)).resolves.toBe('also-ok');
   });
 
+  it('returns to open if the half-open probe fails', async () => {
+    const cb = new CircuitBreaker('test', { threshold: 2, resetMs: 5_000 });
+    const failFn = vi.fn().mockRejectedValue(new Error('fail'));
+
+    // Open the circuit
+    await expect(cb.call(failFn)).rejects.toThrow('fail');
+    await expect(cb.call(failFn)).rejects.toThrow('fail');
+    expect(cb.isOpen()).toBe(true);
+
+    // Advance past resetMs to allow half-open probe
+    vi.advanceTimersByTime(5_001);
+
+    // Probe fails — circuit must re-open
+    await expect(cb.call(failFn)).rejects.toThrow('fail');
+    expect(cb.isOpen()).toBe(true);
+
+    // Must block again immediately (not allow a second probe)
+    await expect(cb.call(vi.fn())).rejects.toThrow('Circuit open: test');
+  });
+
   it('isOpen() returns correct state across lifecycle', async () => {
     const cb = new CircuitBreaker('test', { threshold: 1, resetMs: 1_000 });
 
