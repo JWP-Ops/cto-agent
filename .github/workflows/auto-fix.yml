@@ -15,6 +15,23 @@ on:
         description: 'Name of the CI workflow that failed'
         required: true
         type: string
+      task_type:
+        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure'
+        required: false
+        default: 'fix-ci-failure'
+        type: string
+      sentry_issue_title:
+        required: false
+        default: ''
+        type: string
+      sentry_issue_file:
+        required: false
+        default: ''
+        type: string
+      sentry_issue_line:
+        required: false
+        default: ''
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -182,47 +199,39 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           path: target-repo
 
+      # ── Prompt Routing ─────────────────────────────────────────
+      - name: Select prompt file
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true'
+        id: prompt
+        shell: bash
+        run: |
+          case "${{ inputs.task_type }}" in
+            fix-sentry-issue) echo "file=cto-agent/prompts/fix-sentry-issue.md" >> "$GITHUB_OUTPUT" ;;
+            fix-e2e-failure)  echo "file=cto-agent/prompts/fix-e2e-failure.md"  >> "$GITHUB_OUTPUT" ;;
+            *)                echo "file=cto-agent/prompts/fix-ci-failure.md"   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Set Sentry fix env vars
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true' && inputs.task_type == 'fix-sentry-issue'
+        env:
+          SENTRY_ISSUE_TITLE: ${{ inputs.sentry_issue_title }}
+          SENTRY_ISSUE_FILE: ${{ inputs.sentry_issue_file }}
+          SENTRY_ISSUE_LINE: ${{ inputs.sentry_issue_line }}
+        run: |
+          echo "SENTRY_ISSUE_TITLE=${SENTRY_ISSUE_TITLE}" >> "$GITHUB_ENV"
+          echo "SENTRY_ISSUE_FILE=${SENTRY_ISSUE_FILE}"   >> "$GITHUB_ENV"
+          echo "SENTRY_ISSUE_LINE=${SENTRY_ISSUE_LINE}"   >> "$GITHUB_ENV"
+
       # ── Apply Fix: Claude Code ──────────────────────────────────
       # T1.2: Path restrictions via --disallowedTools
-      # T1.7: Full TDD prompt from fix-ci-failure.md
+      # T1.7: Full TDD prompt routed via task_type
       - name: Claude Code auto-fix
         if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true'
         id: claude-fix
         uses: anthropics/claude-code-action@d3a8d1736a61af74bee88bcac0182c49be969839 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are the CTO Agent for StorScale, an automated system architect that fixes CI failures.
-
-            Repository: ${{ inputs.repo }}
-            Workflow: ${{ inputs.workflow_name }}
-
-            Read the file combined-log.txt and annotations.txt in the parent directory for failure details.
-            Also read pattern-result.json for automated diagnosis (if available).
-
-            ## Constraints (HARD RULES)
-            1. Max 5 files changed — if the fix requires more, create ESCALATE.txt
-            2. Max 100 lines added/removed — if the fix requires more, create ESCALATE.txt
-            3. NEVER modify: .env files, .github/ workflows, package.json, package-lock.json, *.sql migrations, auth modules, middleware files
-            4. NEVER hardcode API keys, tokens, or secrets
-            5. NEVER delete existing tests — only add or modify
-            6. Every fix SHOULD include a regression test
-
-            ## Process (TDD)
-            1. Read the failure logs to understand the root cause
-            2. Read the relevant source files
-            3. Write a test that reproduces the failure condition (if applicable)
-            4. Write the minimal fix that makes the test pass
-            5. Run the test command to verify your fix works before finishing
-
-            ## Common Fixes
-            - console.log in production code → replace with logger.info/warn/error
-            - Env var name mismatch in tests → update test to match agent config
-            - Secret scanner false positive → cannot fix (restricted file), create ESCALATE.txt
-            - Broken require path → fix the relative path
-
-            If you cannot fix this safely, create a file called ESCALATE.txt with the reason.
-            Do NOT commit — the workflow handles commits. Just make the file changes.
+          prompt_file: ${{ steps.prompt.outputs.file }}
           claude_args: '--allowedTools Read,Write,Edit,Glob,Grep --max-turns 25'
 
       # ── T1.1: Run Tests Before Push ─────────────────────────────
