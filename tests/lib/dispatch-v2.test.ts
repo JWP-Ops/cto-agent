@@ -134,6 +134,28 @@ describe('Dispatcher', () => {
     expect(r3.reason).toMatch(/hourly cap/i);
   });
 
+  it('returns dispatched: false when GITHUB_PAT is not set', async () => {
+    vi.resetModules();
+    vi.doMock('../../monitor/src/lib/env.js', () => ({
+      optionalEnv: vi.fn(() => undefined),
+    }));
+    vi.doMock('../../monitor/src/lib/logger.js', () => ({ log: vi.fn() }));
+
+    const mod = await import('../../monitor/src/lib/dispatch-v2.js');
+    const LocalDispatcher = mod.Dispatcher;
+
+    const dispatcher = new LocalDispatcher({ dailyCap: 15, hourlyCap: 3 });
+    const result = await dispatcher.dispatch({
+      category: 'ci-fix',
+      repo: 'StorScale-AI/storscale-agents',
+      workflow: 'auto-fix.yml',
+      inputs: { task_type: 'fix-ci-failure' },
+    });
+
+    expect(result.dispatched).toBe(false);
+    expect(result.reason).toMatch(/GITHUB_PAT/i);
+  });
+
   it('different categories do not share hourly caps', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 204, ok: true }));
 

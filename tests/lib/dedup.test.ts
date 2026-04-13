@@ -43,9 +43,6 @@ describe('DedupStore', () => {
 
     // Expire id-1 and id-2
     vi.advanceTimersByTime(2000);
-    // Access them to trigger expiry cleanup
-    store.has('id-1');
-    store.has('id-2');
     expect(store.size()).toBe(1);
   });
 });

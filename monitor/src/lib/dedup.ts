@@ -16,6 +16,10 @@ export class DedupStore {
   }
 
   size(): number {
+    const now = Date.now();
+    for (const [id, expiry] of this.seen) {
+      if (now > expiry) this.seen.delete(id);
+    }
     return this.seen.size;
   }
 }
