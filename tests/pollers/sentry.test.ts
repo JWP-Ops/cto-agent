@@ -142,6 +142,52 @@ describe('Sentry poller', () => {
     expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('SENTRY_ORG'));
   });
 
+  it('routes to storscale-agents when culprit includes agent-api', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ([{
+        id: 'routing-test',
+        title: 'Error in agent-api',
+        culprit: 'agent-api/src/routes/facilities.ts',
+        status: 'unresolved',
+        lastSeen: new Date().toISOString(),
+        metadata: { filename: 'agent-api/src/routes/facilities.ts', lineNo: 42 },
+      }]),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const dispatcher = makeDispatcher({ dispatched: true });
+    const poller = createSentryPoller(dispatcher);
+    await poller();
+
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'StorScale-AI/storscale-agents' })
+    );
+  });
+
+  it('routes to storscale-website for non-agent-api culprits', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ([{
+        id: 'routing-test-2',
+        title: 'Error in dashboard',
+        culprit: 'src/components/Dashboard.tsx',
+        status: 'unresolved',
+        lastSeen: new Date().toISOString(),
+        metadata: { filename: 'src/components/Dashboard.tsx', lineNo: 10 },
+      }]),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const dispatcher = makeDispatcher({ dispatched: true });
+    const poller = createSentryPoller(dispatcher);
+    await poller();
+
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'StorScale-AI/storscale-website' })
+    );
+  });
+
   it('returns early without crashing when Sentry API returns non-200', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
