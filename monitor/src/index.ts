@@ -21,6 +21,7 @@ import { Dispatcher } from './lib/dispatch-v2.js';
 import { log, setCorrelationId } from './lib/logger.js';
 import { initSentry } from './lib/sentry.js';
 import { sendWeeklyDigest } from './weekly-digest.js';
+import { registerPoller } from './lib/register-poller.js';
 
 const app = new Hono();
 
@@ -77,130 +78,99 @@ async function startPollers() {
   repos = await discoverRepos();
   log('info', `Discovered ${repos.length} repos`);
 
+  // Sentry poller instance (needs dispatcher)
+  const sentryPoller = createSentryPoller(dispatcher);
+
   // GitHub CI poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('github', () => {
     setCorrelationId();
-    try { await pollGitHub(repos); }
-    catch (e) { log('error', `GitHub poller failed: ${e}`); }
+    return pollGitHub(repos);
   }, POLL_INTERVALS.github));
 
   // Render deploy poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('render', () => {
     setCorrelationId();
-    try { await pollRender(); }
-    catch (e) { log('error', `Render poller failed: ${e}`); }
+    return pollRender();
   }, POLL_INTERVALS.render));
 
   // Stripe webhook poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('stripe', () => {
     setCorrelationId();
-    try { await pollStripe(); }
-    catch (e) { log('error', `Stripe poller failed: ${e}`); }
+    return pollStripe();
   }, POLL_INTERVALS.stripe));
 
   // Supabase health poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('supabase', () => {
     setCorrelationId();
-    try { await pollSupabase(); }
-    catch (e) { log('error', `Supabase poller failed: ${e}`); }
+    return pollSupabase();
   }, POLL_INTERVALS.supabase));
 
   // Vercel deploy poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('vercel', () => {
     setCorrelationId();
-    try { await pollVercel(); }
-    catch (e) { log('error', `Vercel poller failed: ${e}`); }
+    return pollVercel();
   }, POLL_INTERVALS.vercel));
 
   // Cloudflare Workers poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('cloudflare', () => {
     setCorrelationId();
-    try { await pollCloudflare(); }
-    catch (e) { log('error', `Cloudflare poller failed: ${e}`); }
+    return pollCloudflare();
   }, POLL_INTERVALS.cloudflare));
 
   // Agent health poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('agents', () => {
     setCorrelationId();
-    try { await pollAgentHealth(); }
-    catch (e) { log('error', `Agent health poller failed: ${e}`); }
+    return pollAgentHealth();
   }, POLL_INTERVALS.agents));
 
   // Domain/SSL expiry poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('domains', () => {
     setCorrelationId();
-    try { await pollDomains(); }
-    catch (e) { log('error', `Domain poller failed: ${e}`); }
+    return pollDomains();
   }, POLL_INTERVALS.domains));
 
   // Self-health poller — the CTO agent monitors itself
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('self-health', () => {
     setCorrelationId();
-    try { await pollSelfHealth(repos); }
-    catch (e) { log('error', `Self-health poller failed: ${e}`); }
+    return pollSelfHealth(repos);
   }, POLL_INTERVALS.selfHealth));
 
   // Airtable health poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('airtable', () => {
     setCorrelationId();
-    try { await pollAirtable(); }
-    catch (e) { log('error', `Airtable poller failed: ${e}`); }
+    return pollAirtable();
   }, POLL_INTERVALS.airtable));
 
   // Attio CRM health poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('attio', () => {
     setCorrelationId();
-    try { await pollAttio(); }
-    catch (e) { log('error', `Attio poller failed: ${e}`); }
+    return pollAttio();
   }, POLL_INTERVALS.attio));
 
   // Liveness probe poller
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('liveness', () => {
     setCorrelationId();
-    try { await pollLiveness(); }
-    catch (e) { log('error', `Liveness poller failed: ${e}`); }
+    return pollLiveness();
   }, POLL_INTERVALS.liveness));
 
   // Sentry issue poller — dispatches auto-fix for unresolved production errors
-  const sentryPoller = createSentryPoller(dispatcher);
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('sentry', () => {
     setCorrelationId();
-    try { await sentryPoller(); }
-    catch (e) { log('error', `Sentry poller failed: ${e}`); }
+    return sentryPoller();
   }, POLL_INTERVALS.sentry));
 
   // Repo discovery refresh
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('discovery', async () => {
     setCorrelationId();
-    try {
-      repos = await discoverRepos();
-      log('info', `Refreshed repo list: ${repos.length} repos`);
-    } catch (e) { log('error', `Discovery failed: ${e}`); }
+    repos = await discoverRepos();
+    log('info', `Refreshed repo list: ${repos.length} repos`);
   }, POLL_INTERVALS.discovery));
 
   // T4.26: Weekly digest — sends Slack summary every 7 days
-  intervalIds.push(setInterval(async () => {
+  intervalIds.push(registerPoller('weekly-digest', () => {
     setCorrelationId();
-    try { await sendWeeklyDigest(); }
-    catch (e) { log('error', `Weekly digest failed: ${e}`); }
+    return sendWeeklyDigest();
   }, 7 * 24 * 60 * 60 * 1000));
-
-  // Run all pollers once on startup
-  await Promise.allSettled([
-    pollGitHub(repos),
-    pollRender(),
-    pollStripe(),
-    pollSupabase(),
-    pollVercel(),
-    pollCloudflare(),
-    pollAgentHealth(),
-    pollDomains(),
-    pollSelfHealth(repos),
-    pollAirtable(),
-    pollAttio(),
-    pollLiveness(),
-    sentryPoller(),
-  ]);
 
   log('info', 'All pollers initialized');
 
@@ -208,12 +178,10 @@ async function startPollers() {
   // Configure HEALTHCHECK_PING_URL with Healthchecks.io, BetterStack, or UptimeRobot
   const pingUrl = process.env.HEALTHCHECK_PING_URL;
   if (pingUrl) {
-    const pingWatchdog = async () => {
+    intervalIds.push(registerPoller('dead-mans-switch', async () => {
       try { await fetch(pingUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) }); }
       catch { log('warn', 'Dead man switch ping failed'); }
-    };
-    intervalIds.push(setInterval(pingWatchdog, 5 * 60 * 1000));
-    pingWatchdog(); // Ping immediately on startup
+    }, 5 * 60 * 1000));
     log('info', 'External dead man switch configured');
   } else {
     log('warn', 'No HEALTHCHECK_PING_URL set — dead man switch disabled. Set up at healthchecks.io or betterstack.com');
