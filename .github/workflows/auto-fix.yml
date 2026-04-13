@@ -32,6 +32,16 @@ on:
         required: false
         default: ''
         type: string
+      e2e_test_file:
+        description: 'E2E test file that failed'
+        required: false
+        default: ''
+        type: string
+      e2e_error_message:
+        description: 'E2E error message'
+        required: false
+        default: ''
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -218,9 +228,22 @@ jobs:
           SENTRY_ISSUE_FILE: ${{ inputs.sentry_issue_file }}
           SENTRY_ISSUE_LINE: ${{ inputs.sentry_issue_line }}
         run: |
-          echo "SENTRY_ISSUE_TITLE=${SENTRY_ISSUE_TITLE}" >> "$GITHUB_ENV"
-          echo "SENTRY_ISSUE_FILE=${SENTRY_ISSUE_FILE}"   >> "$GITHUB_ENV"
-          echo "SENTRY_ISSUE_LINE=${SENTRY_ISSUE_LINE}"   >> "$GITHUB_ENV"
+          {
+            printf 'SENTRY_ISSUE_TITLE<<GH_EOF\n%s\nGH_EOF\n' "${SENTRY_ISSUE_TITLE}"
+            printf 'SENTRY_ISSUE_FILE<<GH_EOF\n%s\nGH_EOF\n'  "${SENTRY_ISSUE_FILE}"
+            printf 'SENTRY_ISSUE_LINE<<GH_EOF\n%s\nGH_EOF\n'  "${SENTRY_ISSUE_LINE}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set E2E fix env vars
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true' && inputs.task_type == 'fix-e2e-failure'
+        env:
+          E2E_TEST_FILE: ${{ inputs.e2e_test_file }}
+          E2E_ERROR_MESSAGE: ${{ inputs.e2e_error_message }}
+        run: |
+          {
+            printf 'E2E_TEST_FILE<<GH_EOF\n%s\nGH_EOF\n'     "${E2E_TEST_FILE}"
+            printf 'E2E_ERROR_MESSAGE<<GH_EOF\n%s\nGH_EOF\n' "${E2E_ERROR_MESSAGE}"
+          } >> "$GITHUB_ENV"
 
       # ── Apply Fix: Claude Code ──────────────────────────────────
       # T1.2: Path restrictions via --disallowedTools
