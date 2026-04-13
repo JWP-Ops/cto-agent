@@ -4,18 +4,11 @@ import { insertIncident, updateIncidentResolved, loadState, saveState } from '..
 import { dispatchAutoFix } from '../dispatch.js';
 import { alertEscalation, sendAlert } from '../slack.js';
 import { recordHealth } from '../health-api.js';
+import { DedupStore } from '../lib/dedup.js';
 
-// Track which run IDs we've already seen to avoid duplicate dispatches
-const seenRuns = new Set<number>();
-const MAX_SEEN = 1000;
+// Track which run IDs we've already seen to avoid duplicate dispatches (TTL: 2 hours)
+const seenRunIds = new DedupStore();
 const PERSIST_SEEN_MAX = 500;
-
-function pruneSeenRuns() {
-  if (seenRuns.size > MAX_SEEN) {
-    const arr = Array.from(seenRuns);
-    arr.slice(0, arr.length - MAX_SEEN / 2).forEach(id => seenRuns.delete(id));
-  }
-}
 
 // Pending fix verifications: repo -> { runId, dispatchedAt }
 const pendingVerifications = new Map<string, { runId: number; dispatchedAt: number }>();
@@ -40,9 +33,9 @@ export async function loadSeenRuns(): Promise<void> {
     const data = await loadState('seen_runs');
     if (Array.isArray(data)) {
       for (const id of data) {
-        if (typeof id === 'number') seenRuns.add(id);
+        if (typeof id === 'number') seenRunIds.add(`ci-run-${id}`);
       }
-      log('info', `Loaded ${seenRuns.size} seen runs from Supabase`);
+      log('info', `Loaded ${seenRunIds.size()} seen runs from Supabase`);
     }
   } catch (e) {
     log('warn', `Failed to load seen runs: ${e}`);
@@ -50,17 +43,20 @@ export async function loadSeenRuns(): Promise<void> {
 }
 
 /**
- * Persist seenRuns to Supabase. Keeps the most recent entries.
+ * Persist seenRunIds to Supabase. Keeps the most recent entries (as numeric IDs).
  */
 async function persistSeenRuns(): Promise<void> {
   try {
-    const arr = Array.from(seenRuns);
-    const toSave = arr.slice(Math.max(0, arr.length - PERSIST_SEEN_MAX));
-    await saveState('seen_runs', toSave);
+    // Extract numeric IDs from the "ci-run-<id>" keys tracked in DedupStore
+    // DedupStore doesn't expose keys directly, so we maintain a parallel list for persistence
+    await saveState('seen_runs', _seenRunIdList.slice(Math.max(0, _seenRunIdList.length - PERSIST_SEEN_MAX)));
   } catch (e) {
     log('warn', `Failed to persist seen runs: ${e}`);
   }
 }
+
+// Parallel list of numeric run IDs for Supabase persistence (DedupStore keys aren't enumerable)
+const _seenRunIdList: number[] = [];
 
 /**
  * Attempt to revert the last CTO-fix commit by creating a revert via GitHub API.
@@ -241,8 +237,12 @@ export async function pollGitHub(repos: string[]): Promise<void> {
 
       const latestRun = runs[0];
 
-      if (latestRun.conclusion === 'failure' && !seenRuns.has(latestRun.id)) {
-        seenRuns.add(latestRun.id);
+      const runKey = `ci-run-${latestRun.id}`;
+      if (latestRun.conclusion === 'failure' && seenRunIds.has(runKey)) {
+        log('debug', 'Skipping duplicate CI fix dispatch', { runId: latestRun.id });
+      } else if (latestRun.conclusion === 'failure' && !seenRunIds.has(runKey)) {
+        seenRunIds.add(runKey);
+        _seenRunIdList.push(latestRun.id);
         failedCount++;
         failures.push(repo);
 
@@ -295,9 +295,7 @@ export async function pollGitHub(repos: string[]): Promise<void> {
     }
   }
 
-  pruneSeenRuns();
-
-  // Persist seenRuns to Supabase (fire-and-forget)
+  // Persist seenRunIds to Supabase (fire-and-forget)
   persistSeenRuns().catch(e => log('warn', `Failed to persist seen runs: ${e}`));
 
   recordHealth('github', {

@@ -36,6 +36,7 @@ import { recordHealth } from '../../monitor/src/health-api.js';
 import { dispatchAutoFix } from '../../monitor/src/dispatch.js';
 import { alertEscalation } from '../../monitor/src/slack.js';
 import { insertIncident } from '../../monitor/src/lib/supabase.js';
+import { log } from '../../monitor/src/lib/logger.js';
 
 describe('GitHub poller', () => {
   beforeEach(() => {
@@ -248,6 +249,38 @@ describe('GitHub poller', () => {
     await pollGitHub(['test/repo']);
 
     expect(dispatchAutoFix).not.toHaveBeenCalled();
+  });
+
+  it('DedupStore prevents second dispatch for same run ID', async () => {
+    // Run ID 6001 — unique to this test
+    const run = {
+      id: 6001,
+      name: 'CI',
+      conclusion: 'failure',
+      status: 'completed',
+      head_branch: 'main',
+      head_commit: { message: 'broken', author: { name: 'dev' } },
+      html_url: 'https://github.com/test/repo/actions/runs/6001',
+      created_at: new Date().toISOString(),
+    };
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ workflow_runs: [run] }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    // First poll — should dispatch
+    await pollGitHub(['test/repo-dedup']);
+    expect(dispatchAutoFix).toHaveBeenCalledTimes(1);
+
+    // Clear mocks but NOT module state (DedupStore persists)
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
+
+    // Second poll — same run ID, DedupStore should block dispatch
+    await pollGitHub(['test/repo-dedup']);
+    expect(dispatchAutoFix).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith('debug', 'Skipping duplicate CI fix dispatch', { runId: 6001 });
   });
 
   it('reports failures array in health data', async () => {
