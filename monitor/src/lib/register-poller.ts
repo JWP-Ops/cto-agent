@@ -6,15 +6,19 @@ export function registerPoller(
   name: string,
   fn: PollerFn,
   intervalMs: number,
-): void {
+): ReturnType<typeof setInterval> {
   const run = async () => {
     try {
       await fn();
     } catch (err) {
-      log('error', `Poller ${name} failed`, { poller: name, err });
+      log('error', `Poller ${name} failed`, {
+        poller: name,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
     }
   };
 
   void run();
-  setInterval(() => void run(), intervalMs);
+  return setInterval(() => void run(), intervalMs);
 }

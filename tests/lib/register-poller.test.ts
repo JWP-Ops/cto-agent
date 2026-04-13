@@ -55,7 +55,7 @@ describe('registerPoller', () => {
     expect(log).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('failing-poller'),
-      expect.objectContaining({ poller: 'failing-poller' }),
+      expect.objectContaining({ poller: 'failing-poller', error: 'boom' }),
     );
   });
 
@@ -73,7 +73,7 @@ describe('registerPoller', () => {
     expect(log).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('interval-fail'),
-      expect.objectContaining({ poller: 'interval-fail' }),
+      expect.objectContaining({ poller: 'interval-fail', error: 'interval error' }),
     );
   });
 });
