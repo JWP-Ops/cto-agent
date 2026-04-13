@@ -1,0 +1,39 @@
+# CTO Agent Auto-Fix Caller
+# Drop this file into any repo at .github/workflows/cto-auto-fix.yml
+#
+# IMPORTANT: The "workflows" list MUST exactly match the `name:` field of
+# your CI workflow (defined in .github/workflows/ci.yml or equivalent).
+# Check with: grep "^name:" .github/workflows/ci.yml
+#
+# All three monitored StorScale repos use `name: CI` — so the default below
+# is correct. Only change it if your CI workflow has a different name.
+#
+# Required secrets (configure at org or repo level):
+#   - ANTHROPIC_API_KEY   (Anthropic API key for Claude Code)
+#   - GH_PAT              (GitHub PAT with repo + actions + workflow scopes)
+#   - SLACK_WEBHOOK_URL   (optional — Slack notifications)
+
+name: CTO Auto-Fix
+
+on:
+  workflow_run:
+    workflows: ["CI"]  # ← Must match the exact `name:` of your CI workflow
+    types: [completed]
+
+permissions:
+  contents: write
+  id-token: write
+  actions: read
+
+jobs:
+  auto-fix:
+    if: github.event.workflow_run.conclusion == 'failure'
+    uses: JWP-Ops/cto-agent/.github/workflows/auto-fix.yml@main
+    with:
+      repo: ${{ github.repository }}
+      run_id: ${{ github.event.workflow_run.id }}
+      workflow_name: ${{ github.event.workflow_run.name }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
