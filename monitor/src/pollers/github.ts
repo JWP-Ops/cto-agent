@@ -243,6 +243,9 @@ export async function pollGitHub(repos: string[]): Promise<void> {
       } else if (latestRun.conclusion === 'failure' && !seenRunIds.has(runKey)) {
         seenRunIds.add(runKey);
         _seenRunIdList.push(latestRun.id);
+        if (_seenRunIdList.length > PERSIST_SEEN_MAX) {
+          _seenRunIdList.splice(0, _seenRunIdList.length - PERSIST_SEEN_MAX);
+        }
         failedCount++;
         failures.push(repo);
 
