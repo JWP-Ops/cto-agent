@@ -18,7 +18,7 @@ on:
         default: 'unknown'
         type: string
       task_type:
-        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests'
+        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch'
         required: false
         default: 'fix-ci-failure'
         type: string
@@ -115,7 +115,7 @@ on:
         default: 'manual'
         type: string
       task_type:
-        description: 'fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests'
+        description: 'fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch'
         required: false
         default: 'fix-ci-failure'
         type: string
