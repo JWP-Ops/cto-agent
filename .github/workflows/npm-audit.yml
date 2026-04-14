@@ -1,0 +1,140 @@
+name: npm Audit — Dependency Security
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 7 AM UTC daily (after test-gap-detection at 6 AM)
+  workflow_dispatch: {}
+
+jobs:
+  audit-storscale-agents:
+    name: Audit — storscale-agents
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout storscale-agents
+        uses: actions/checkout@v4
+        with:
+          repository: StorScale-AI/storscale-agents
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit and post CVEs to monitor
+        env:
+          CTO_API_URL: https://cto-agent-monitor.onrender.com
+          CTO_API_KEY: ${{ secrets.CTO_API_KEY }}
+        run: |
+          node --input-type=module << 'SCRIPT'
+          import { spawnSync } from 'child_process';
+
+          // npm audit exits non-zero when vulns found — stdout still has JSON
+          const result = spawnSync('npm', ['audit', '--json'], { encoding: 'utf8' });
+          const raw = result.stdout ?? '';
+          if (!raw) { console.log('No audit output'); process.exit(0); }
+
+          const audit = JSON.parse(raw);
+          const vulns = audit.vulnerabilities ?? {};
+
+          const entries = Object.entries(vulns)
+            .filter(([, data]) => ['critical', 'high'].includes(data.severity))
+            .map(([packageName, data]) => {
+              const via = Array.isArray(data.via) ? data.via.find(v => typeof v === 'object') : null;
+              const fix = data.fixAvailable;
+              return {
+                cveId:          via?.url ?? via?.name ?? 'audit-' + packageName,
+                packageName,
+                currentVersion: packageName,
+                fixedVersion:   (typeof fix === 'object' && fix !== null) ? fix.version : 'latest',
+                severity:       data.severity,
+                title:          via?.title ?? 'Vulnerability in ' + packageName,
+              };
+            });
+
+          if (entries.length === 0) {
+            console.log('No critical or high vulnerabilities');
+            process.exit(0);
+          }
+
+          const res = await fetch(process.env.CTO_API_URL + '/api/vulnerabilities', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + process.env.CTO_API_KEY,
+            },
+            body: JSON.stringify({ repo: 'StorScale-AI/storscale-agents', vulnerabilities: entries }),
+          });
+          console.log('Response:', JSON.stringify(await res.json()));
+          SCRIPT
+
+  audit-storscale-dashboard:
+    name: Audit — storscale-website (dashboard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout storscale-website
+        uses: actions/checkout@v4
+        with:
+          repository: StorScale-AI/storscale-website
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit and post CVEs to monitor
+        env:
+          CTO_API_URL: https://cto-agent-monitor.onrender.com
+          CTO_API_KEY: ${{ secrets.CTO_API_KEY }}
+        run: |
+          node --input-type=module << 'SCRIPT'
+          import { spawnSync } from 'child_process';
+
+          const result = spawnSync('npm', ['audit', '--json'], { encoding: 'utf8' });
+          const raw = result.stdout ?? '';
+          if (!raw) { console.log('No audit output'); process.exit(0); }
+
+          const audit = JSON.parse(raw);
+          const vulns = audit.vulnerabilities ?? {};
+
+          const entries = Object.entries(vulns)
+            .filter(([, data]) => ['critical', 'high'].includes(data.severity))
+            .map(([packageName, data]) => {
+              const via = Array.isArray(data.via) ? data.via.find(v => typeof v === 'object') : null;
+              const fix = data.fixAvailable;
+              return {
+                cveId:          via?.url ?? via?.name ?? 'audit-' + packageName,
+                packageName,
+                currentVersion: packageName,
+                fixedVersion:   (typeof fix === 'object' && fix !== null) ? fix.version : 'latest',
+                severity:       data.severity,
+                title:          via?.title ?? 'Vulnerability in ' + packageName,
+              };
+            });
+
+          if (entries.length === 0) {
+            console.log('No critical or high vulnerabilities');
+            process.exit(0);
+          }
+
+          const res = await fetch(process.env.CTO_API_URL + '/api/vulnerabilities', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + process.env.CTO_API_KEY,
+            },
+            body: JSON.stringify({ repo: 'StorScale-AI/storscale-website', vulnerabilities: entries }),
+          });
+          console.log('Response:', JSON.stringify(await res.json()));
+          SCRIPT
