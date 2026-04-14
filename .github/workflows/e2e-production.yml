@@ -1,0 +1,81 @@
+name: E2E Production Tests
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-production
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Run Playwright E2E against app.storscale.ai
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      failed: ${{ steps.test.outcome == 'failure' && 'true' || 'false' }}
+      test_file: ${{ steps.parse.outputs.test_file }}
+      error_message: ${{ steps.parse.outputs.error_message }}
+
+    steps:
+      - name: Checkout storscale-website (E2E test suite)
+        uses: actions/checkout@v4
+        with:
+          repository: StorScale-AI/storscale-website
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        id: test
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_BASE_URL: https://app.storscale.ai
+          E2E_USER_EMAIL: e2e-test@storscale.ai
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+        run: |
+          npx playwright test \
+            --reporter=list,json \
+            --output=playwright-report \
+            2>&1 | tee playwright-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Parse failure details
+        id: parse
+        if: steps.test.outcome == 'failure'
+        run: |
+          TEST_FILE=$(grep -E '^\s+×' playwright-output.txt | head -1 \
+            | sed 's/.*× //' | sed 's/:.*//' || echo '')
+          ERROR_MSG=$(grep -A2 'Error:' playwright-output.txt | head -6 \
+            | tr '\n' ' ' | cut -c1-400 || echo 'See Playwright report for details')
+          echo "test_file=${TEST_FILE}" >> "$GITHUB_OUTPUT"
+          echo "error_message=${ERROR_MSG}" >> "$GITHUB_OUTPUT"
+
+  dispatch-fix:
+    name: Dispatch auto-fix on E2E failure
+    needs: e2e
+    if: needs.e2e.outputs.failed == 'true'
+    uses: JWP-Ops/cto-agent/.github/workflows/auto-fix.yml@main
+    with:
+      repo: StorScale-AI/storscale-website
+      run_id: 0
+      workflow_name: e2e-production
+      task_type: fix-e2e-failure
+      e2e_test_file: ${{ needs.e2e.outputs.test_file }}
+      e2e_error_message: ${{ needs.e2e.outputs.error_message }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
