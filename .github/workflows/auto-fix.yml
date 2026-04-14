@@ -10,8 +10,8 @@ on:
       run_id:
         description: 'Failed workflow run ID (0 for synthetic/E2E triggers)'
         required: false
-        default: 0
-        type: number
+        default: '0'
+        type: string
       workflow_name:
         description: 'Name of the CI workflow that failed'
         required: false
@@ -71,8 +71,8 @@ on:
       run_id:
         description: 'Failed run ID (0 for non-CI triggers)'
         required: false
-        default: 0
-        type: number
+        default: '0'
+        type: string
       workflow_name:
         description: 'Source workflow name'
         required: false

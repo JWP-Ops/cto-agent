@@ -80,7 +80,7 @@ jobs:
     uses: JWP-Ops/cto-agent/.github/workflows/auto-fix.yml@main
     with:
       repo: StorScale-AI/storscale-website
-      run_id: 0
+      run_id: '0'
       workflow_name: e2e-production
       task_type: fix-e2e-failure
       e2e_test_file: ${{ needs.e2e.outputs.test_file }}
