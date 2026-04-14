@@ -153,6 +153,25 @@ describe('render-deploys poller', () => {
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
+  it('detects update_failed status', async () => {
+    const UPDATE_FAILED_DEPLOY = [{ deploy: { id: 'dep-444', status: 'update_failed', commit: { message: 'feat: update broke' } } }];
+    mockFetch((url) => {
+      if (url.includes('/services?')) return { ok: true, json: SERVICES };
+      if (url.includes('/deploys?')) return { ok: true, json: UPDATE_FAILED_DEPLOY };
+      return { ok: false, json: [] };
+    });
+    const dispatcher = makeDispatcher();
+    const poller = createRenderDeploysPoller(dispatcher as never);
+    await poller();
+
+    expect(dispatcher.dispatch).toHaveBeenCalledOnce();
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputs: expect.objectContaining({ deploy_id: 'dep-444' }),
+      }),
+    );
+  });
+
   it('continues to other services when one deploy fetch fails (HTTP 500)', async () => {
     mockFetch((url) => {
       if (url.includes('/services?'))       return { ok: true, json: TWO_SERVICES };

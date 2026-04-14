@@ -4,7 +4,7 @@ import { optionalEnv } from '../lib/env.js';
 import type { Dispatcher } from '../lib/dispatch-v2.js';
 
 const RENDER_API_BASE = 'https://api.render.com/v1';
-const FAILED_STATUSES = new Set(['failed', 'build_failed']);
+const FAILED_STATUSES = new Set(['failed', 'build_failed', 'update_failed']);
 
 interface RenderService {
   id: string;
@@ -16,7 +16,7 @@ interface RenderService {
 interface RenderDeploy {
   id: string;
   status: string;
-  commit?: { id?: string; message?: string };
+  commit?: { message?: string };
   finishedAt?: string;
 }
 
@@ -121,12 +121,6 @@ export function createRenderDeploysPoller(dispatcher: Dispatcher) {
           commit: commitMsg,
         });
 
-        await sendAlert({
-          severity: 'danger',
-          title: `CTO Agent: Render Deploy Failed — ${service.name}`,
-          message: `*Service:* ${service.name}\n*Status:* ${deploy.status}\n*Deploy:* \`${deploy.id}\`\n*Commit:* ${commitMsg}\nDispatching auto-fix.`,
-        });
-
         await dispatcher.dispatch({
           category: 'e2e-fix',
           repo: 'JWP-Ops/cto-agent',
@@ -142,6 +136,13 @@ export function createRenderDeploysPoller(dispatcher: Dispatcher) {
           },
           dedupeId: `render-deploy-${deploy.id}`,
         });
+
+        // Alert after dispatch so a Slack outage cannot block the auto-fix
+        await sendAlert({
+          severity: 'danger',
+          title: `CTO Agent: Render Deploy Failed — ${service.name}`,
+          message: `*Service:* ${service.name}\n*Status:* ${deploy.status}\n*Deploy:* \`${deploy.id}\`\n*Commit:* ${commitMsg}\nAuto-fix dispatched.`,
+        }).catch((err) => log('warn', 'render-deploys: Slack alert failed', { error: String(err) }));
       }),
     );
   };
