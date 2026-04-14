@@ -54,7 +54,43 @@ on:
         required: false
         default: ''
         type: string
+      deploy_service:
+        description: 'Render service name (for fix-deploy-failure)'
+        required: false
+        default: ''
+        type: string
+      deploy_id:
+        description: 'Render deploy ID (for fix-deploy-failure)'
+        required: false
+        default: ''
+        type: string
+      deploy_logs:
+        description: 'Render deploy failure summary (for fix-deploy-failure)'
+        required: false
+        default: ''
+        type: string
+      vulnerable_package:
+        description: 'npm package name with vulnerability (for dep-patch)'
+        required: false
+        default: ''
+        type: string
+      fixed_version:
+        description: 'Package version that patches the vulnerability'
+        required: false
+        default: ''
+        type: string
+      severity:
+        description: 'Vulnerability severity: critical | high (for dep-patch)'
+        required: false
+        default: ''
+        type: string
+      cve_id:
+        description: 'CVE ID or GHSA advisory ID (for dep-patch)'
+        required: false
+        default: ''
+        type: string
     secrets:
+
       ANTHROPIC_API_KEY:
         required: true
       GH_PAT:
@@ -108,6 +144,34 @@ on:
         default: ''
         type: string
       coverage_pct:
+        required: false
+        default: ''
+        type: string
+      deploy_service:
+        required: false
+        default: ''
+        type: string
+      deploy_id:
+        required: false
+        default: ''
+        type: string
+      deploy_logs:
+        required: false
+        default: ''
+        type: string
+      vulnerable_package:
+        required: false
+        default: ''
+        type: string
+      fixed_version:
+        required: false
+        default: ''
+        type: string
+      severity:
+        required: false
+        default: ''
+        type: string
+      cve_id:
         required: false
         default: ''
         type: string
@@ -285,10 +349,12 @@ jobs:
         shell: bash
         run: |
           case "${{ inputs.task_type }}" in
-            fix-sentry-issue) echo "file=cto-agent/prompts/fix-sentry-issue.md"  >> "$GITHUB_OUTPUT" ;;
-            fix-e2e-failure)  echo "file=cto-agent/prompts/fix-e2e-failure.md"   >> "$GITHUB_OUTPUT" ;;
-            generate-tests)   echo "file=cto-agent/prompts/generate-tests.md"    >> "$GITHUB_OUTPUT" ;;
-            *)                echo "file=cto-agent/prompts/fix-ci-failure.md"    >> "$GITHUB_OUTPUT" ;;
+            fix-sentry-issue)   echo "file=cto-agent/prompts/fix-sentry-issue.md"    >> "$GITHUB_OUTPUT" ;;
+            fix-e2e-failure)    echo "file=cto-agent/prompts/fix-e2e-failure.md"     >> "$GITHUB_OUTPUT" ;;
+            generate-tests)     echo "file=cto-agent/prompts/generate-tests.md"      >> "$GITHUB_OUTPUT" ;;
+            fix-deploy-failure) echo "file=cto-agent/prompts/fix-deploy-failure.md"  >> "$GITHUB_OUTPUT" ;;
+            dep-patch)          echo "file=cto-agent/prompts/fix-vulnerability.md"   >> "$GITHUB_OUTPUT" ;;
+            *)                  echo "file=cto-agent/prompts/fix-ci-failure.md"      >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Set Sentry fix env vars
@@ -324,6 +390,34 @@ jobs:
           {
             printf 'UNCOVERED_FILE<<GH_EOF\n%s\nGH_EOF\n' "${UNCOVERED_FILE}"
             printf 'COVERAGE_PCT<<GH_EOF\n%s\nGH_EOF\n'   "${COVERAGE_PCT}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set deploy-failure env vars
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true' && inputs.task_type == 'fix-deploy-failure'
+        env:
+          DEPLOY_SERVICE: ${{ inputs.deploy_service }}
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+          DEPLOY_LOGS: ${{ inputs.deploy_logs }}
+        run: |
+          {
+            printf 'DEPLOY_SERVICE<<GH_EOF\n%s\nGH_EOF\n' "${DEPLOY_SERVICE}"
+            printf 'DEPLOY_ID<<GH_EOF\n%s\nGH_EOF\n'      "${DEPLOY_ID}"
+            printf 'DEPLOY_LOGS<<GH_EOF\n%s\nGH_EOF\n'    "${DEPLOY_LOGS}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set dep-patch env vars
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true' && inputs.task_type == 'dep-patch'
+        env:
+          VULNERABLE_PACKAGE: ${{ inputs.vulnerable_package }}
+          FIXED_VERSION: ${{ inputs.fixed_version }}
+          SEVERITY: ${{ inputs.severity }}
+          CVE_ID: ${{ inputs.cve_id }}
+        run: |
+          {
+            printf 'VULNERABLE_PACKAGE<<GH_EOF\n%s\nGH_EOF\n' "${VULNERABLE_PACKAGE}"
+            printf 'FIXED_VERSION<<GH_EOF\n%s\nGH_EOF\n'      "${FIXED_VERSION}"
+            printf 'SEVERITY<<GH_EOF\n%s\nGH_EOF\n'           "${SEVERITY}"
+            printf 'CVE_ID<<GH_EOF\n%s\nGH_EOF\n'             "${CVE_ID}"
           } >> "$GITHUB_ENV"
 
       # ── Apply Fix: Claude Code ──────────────────────────────────
