@@ -1,0 +1,127 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CTO Agent — CI Pipeline
+# Runs on every push and PR to main. Validates typecheck, build, tests,
+# and security. No cto-auto-fix caller — the agent cannot self-repair.
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ── TypeScript Type Check ──────────────────────────────────────────────────
+  typecheck:
+    name: TypeCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+  # ── Build ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  # ── Unit Tests ─────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run test suite
+        env:
+          NODE_ENV: test
+          ANTHROPIC_API_KEY: test-key
+          GH_TOKEN: test-token
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: test-key
+        run: npm test
+
+  # ── Security Audit ─────────────────────────────────────────────────────────
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (high + critical)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Check for .env files in repo
+        run: |
+          ENV_FILES=$(find . -name ".env" -not -path "*/node_modules/*" -not -path "*/.git/*" | grep -v ".env.example" || true)
+          if [ -n "$ENV_FILES" ]; then
+            echo "::error::Real .env files found in repository:"
+            echo "$ENV_FILES"
+            exit 1
+          fi
+
+      - name: Check for hardcoded secrets
+        run: |
+          SECRETS=$(grep -rn \
+            -e "sk-ant-api" \
+            -e "sk_live_" \
+            -e "sk_test_" \
+            -e "ghp_[A-Za-z0-9]" \
+            --include="*.ts" --include="*.js" \
+            --exclude-dir=node_modules \
+            --exclude-dir=dist \
+            --exclude="*.test.ts" \
+            src/ patterns/ monitor/ || true)
+          if [ -n "$SECRETS" ]; then
+            echo "::error::Potential hardcoded secrets detected:"
+            echo "$SECRETS"
+            exit 1
+          fi
