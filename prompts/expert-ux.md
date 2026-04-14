@@ -71,3 +71,9 @@ Write a file called `review-ux.json` with this exact structure:
 - COMMENT: Only WARN/NOTE findings — observations that don't block but should be addressed soon
 
 After writing `review-ux.json`, do NOT post the comment yourself — the workflow handles that.
+
+**Critical JSON rules — the file must be valid JSON:**
+- All string values must have double quotes escaped as `\"` (not raw `"`).
+- Use `\n` for line breaks inside string values — do NOT embed literal newlines inside a quoted string.
+- No trailing commas, no `NaN`, no `Infinity`, no comments.
+- Keep `comment_body` as a single flat string. Use `\n\n` for paragraph breaks and `\n` for line breaks.
