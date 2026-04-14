@@ -16,7 +16,9 @@ import { pollAttio } from './pollers/attio.js';
 import { pollLiveness } from './pollers/liveness.js';
 import { createSentryPoller } from './pollers/sentry.js';
 import { createSyntheticChecksPoller } from './pollers/synthetic-checks.js';
+import { createRenderDeploysPoller } from './pollers/render-deploys.js';
 import { coverageRoutes } from './routes/coverage.js';
+import { vulnerabilityRoutes } from './routes/vulnerabilities.js';
 import { healthRoutes } from './health-api.js';
 import { loadDispatchState } from './dispatch.js';
 import { Dispatcher } from './lib/dispatch-v2.js';
@@ -57,6 +59,7 @@ const POLL_INTERVALS = {
   liveness: 2 * 60 * 1000,       // 2 min
   sentry: 10 * 60 * 1000,        // 10 min
   syntheticChecks: 5 * 60 * 1000,   // 5 min — response shape validation
+  renderDeploys: 5 * 60 * 1000,     // 5 min — Render deploy failure detection
 };
 
 // T4.30: Track intervals for graceful shutdown
@@ -73,6 +76,7 @@ async function startPollers() {
 
   // Coverage gap reporting endpoint — called by test-gap-detection.yml
   coverageRoutes(app, dispatcher);
+  vulnerabilityRoutes(app, dispatcher);
 
   // T2.10: Load persisted state from Supabase before polling
   await Promise.allSettled([
@@ -171,6 +175,13 @@ async function startPollers() {
     setCorrelationId();
     return syntheticChecksPoller();
   }, POLL_INTERVALS.syntheticChecks));
+
+  // Render deploy failure detection — dispatches fix-deploy-failure on failed/build_failed/update_failed
+  const renderDeploysPoller = createRenderDeploysPoller(dispatcher);
+  intervalIds.push(registerPoller('render-deploys', () => {
+    setCorrelationId();
+    return renderDeploysPoller();
+  }, POLL_INTERVALS.renderDeploys));
 
   // Repo discovery refresh
   intervalIds.push(registerPoller('discovery', async () => {
