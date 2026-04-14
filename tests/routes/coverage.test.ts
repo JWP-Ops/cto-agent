@@ -43,6 +43,10 @@ describe('POST /api/coverage-gaps', () => {
     process.env = { ...OLD_ENV, CTO_API_KEY: 'test-key' };
   });
 
+  afterEach(() => {
+    process.env = OLD_ENV;
+  });
+
   it('returns 401 when API key missing', async () => {
     const { app } = makeApp();
     const res = await post(app, {}, '');
