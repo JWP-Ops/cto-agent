@@ -93,7 +93,10 @@ describe('synthetic-checks poller', () => {
     expect(dispatcher.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         category: 'e2e-fix',
+        repo: 'JWP-Ops/cto-agent',
+        workflow: 'auto-fix.yml',
         inputs: expect.objectContaining({
+          repo: 'StorScale-AI/storscale-agents',
           task_type: 'fix-e2e-failure',
           e2e_test_file: expect.stringContaining('synthetic-check:api-health'),
         }),
