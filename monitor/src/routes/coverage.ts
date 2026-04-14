@@ -78,11 +78,13 @@ export function coverageRoutes(app: Hono, dispatcher: Dispatcher): void {
       }
     }
 
-    await sendAlert({
-      severity: 'warning',
-      title: 'CTO Agent: Test Gap Detection',
-      message: `*Repo:* ${body.repo}\nDispatched ${dispatched} test-generation job(s).\n*Files:* ${uncovered.map((e) => `${e.file} (${e.linePct}%)`).join(', ')}`,
-    });
+    if (dispatched > 0) {
+      await sendAlert({
+        severity: 'warning',
+        title: 'CTO Agent: Test Gap Detection',
+        message: `*Repo:* ${body.repo}\nDispatched ${dispatched} test-generation job(s).\n*Files:* ${uncovered.map((e) => `${e.file} (${e.linePct}%)`).join(', ')}`,
+      });
+    }
 
     return c.json({ dispatched, files: uncovered.map((e) => e.file) });
   });

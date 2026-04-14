@@ -30,7 +30,7 @@ const app = new Hono();
 app.use('/api/*', cors({
   origin: ['https://app.storscale.ai', 'http://localhost:5173'],
   allowHeaders: ['Authorization', 'Content-Type'],
-  allowMethods: ['GET'],
+  allowMethods: ['GET', 'POST'],
 }));
 
 // Health check

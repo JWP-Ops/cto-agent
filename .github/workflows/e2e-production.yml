@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      failed: ${{ steps.test.outcome == 'failure' && 'true' || 'false' }}
+      failed: ${{ steps.outcome.outputs.failed }}
       test_file: ${{ steps.parse.outputs.test_file }}
       error_message: ${{ steps.parse.outputs.error_message }}
 
@@ -51,6 +51,16 @@ jobs:
             --output=playwright-report \
             2>&1 | tee playwright-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Set failure output
+        id: outcome
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "failure" ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Parse failure details
         id: parse
