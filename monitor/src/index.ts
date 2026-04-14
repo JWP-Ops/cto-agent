@@ -18,6 +18,7 @@ import { createSentryPoller } from './pollers/sentry.js';
 import { createSyntheticChecksPoller } from './pollers/synthetic-checks.js';
 import { createRenderDeploysPoller } from './pollers/render-deploys.js';
 import { coverageRoutes } from './routes/coverage.js';
+import { vulnerabilityRoutes } from './routes/vulnerabilities.js';
 import { healthRoutes } from './health-api.js';
 import { loadDispatchState } from './dispatch.js';
 import { Dispatcher } from './lib/dispatch-v2.js';
@@ -75,6 +76,7 @@ async function startPollers() {
 
   // Coverage gap reporting endpoint — called by test-gap-detection.yml
   coverageRoutes(app, dispatcher);
+  vulnerabilityRoutes(app, dispatcher);
 
   // T2.10: Load persisted state from Supabase before polling
   await Promise.allSettled([
