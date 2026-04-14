@@ -15,6 +15,8 @@ import { pollAirtable } from './pollers/airtable.js';
 import { pollAttio } from './pollers/attio.js';
 import { pollLiveness } from './pollers/liveness.js';
 import { createSentryPoller } from './pollers/sentry.js';
+import { createSyntheticChecksPoller } from './pollers/synthetic-checks.js';
+import { coverageRoutes } from './routes/coverage.js';
 import { healthRoutes } from './health-api.js';
 import { loadDispatchState } from './dispatch.js';
 import { Dispatcher } from './lib/dispatch-v2.js';
@@ -28,7 +30,7 @@ const app = new Hono();
 app.use('/api/*', cors({
   origin: ['https://app.storscale.ai', 'http://localhost:5173'],
   allowHeaders: ['Authorization', 'Content-Type'],
-  allowMethods: ['GET'],
+  allowMethods: ['GET', 'POST'],
 }));
 
 // Health check
@@ -54,6 +56,7 @@ const POLL_INTERVALS = {
   attio: 5 * 60 * 1000,          // 5 min
   liveness: 2 * 60 * 1000,       // 2 min
   sentry: 10 * 60 * 1000,        // 10 min
+  syntheticChecks: 5 * 60 * 1000,   // 5 min — response shape validation
 };
 
 // T4.30: Track intervals for graceful shutdown
@@ -67,6 +70,9 @@ async function startPollers() {
 
   // Dispatcher instance shared by v2 pollers (rate-limited, dedup-aware)
   const dispatcher = new Dispatcher();
+
+  // Coverage gap reporting endpoint — called by test-gap-detection.yml
+  coverageRoutes(app, dispatcher);
 
   // T2.10: Load persisted state from Supabase before polling
   await Promise.allSettled([
@@ -158,6 +164,13 @@ async function startPollers() {
     setCorrelationId();
     return sentryPoller();
   }, POLL_INTERVALS.sentry));
+
+  // Synthetic checks — validates response shapes, escalates after 2 consecutive failures
+  const syntheticChecksPoller = createSyntheticChecksPoller(dispatcher);
+  intervalIds.push(registerPoller('synthetic-checks', () => {
+    setCorrelationId();
+    return syntheticChecksPoller();
+  }, POLL_INTERVALS.syntheticChecks));
 
   // Repo discovery refresh
   intervalIds.push(registerPoller('discovery', async () => {

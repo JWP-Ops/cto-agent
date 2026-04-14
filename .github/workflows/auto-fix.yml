@@ -8,15 +8,17 @@ on:
         required: true
         type: string
       run_id:
-        description: 'Failed workflow run ID'
-        required: true
+        description: 'Failed workflow run ID (0 for synthetic/E2E triggers)'
+        required: false
+        default: 0
         type: number
       workflow_name:
         description: 'Name of the CI workflow that failed'
-        required: true
+        required: false
+        default: 'unknown'
         type: string
       task_type:
-        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure'
+        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests'
         required: false
         default: 'fix-ci-failure'
         type: string
@@ -33,12 +35,22 @@ on:
         default: ''
         type: string
       e2e_test_file:
-        description: 'E2E test file that failed'
+        description: 'E2E test file that failed (or synthetic-check:name)'
         required: false
         default: ''
         type: string
       e2e_error_message:
-        description: 'E2E error message'
+        description: 'E2E error message or synthetic check failure details'
+        required: false
+        default: ''
+        type: string
+      uncovered_file:
+        description: 'Source file with low test coverage (for generate-tests)'
+        required: false
+        default: ''
+        type: string
+      coverage_pct:
+        description: 'Current line coverage percentage for the uncovered file'
         required: false
         default: ''
         type: string
@@ -49,6 +61,56 @@ on:
         required: true
       SLACK_WEBHOOK_URL:
         required: false
+
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repo to fix (org/name format)'
+        required: true
+        type: string
+      run_id:
+        description: 'Failed run ID (0 for non-CI triggers)'
+        required: false
+        default: 0
+        type: number
+      workflow_name:
+        description: 'Source workflow name'
+        required: false
+        default: 'manual'
+        type: string
+      task_type:
+        description: 'fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests'
+        required: false
+        default: 'fix-ci-failure'
+        type: string
+      sentry_issue_title:
+        required: false
+        default: ''
+        type: string
+      sentry_issue_file:
+        required: false
+        default: ''
+        type: string
+      sentry_issue_line:
+        required: false
+        default: ''
+        type: string
+      e2e_test_file:
+        required: false
+        default: ''
+        type: string
+      e2e_error_message:
+        required: false
+        default: ''
+        type: string
+      uncovered_file:
+        required: false
+        default: ''
+        type: string
+      coverage_pct:
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: cto-fix-${{ inputs.repo }}
@@ -76,6 +138,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
+          # Skip loop guard for non-CI triggers (synthetic checks, test-gap-detection)
+          if [ "${TARGET_RUN_ID}" = "0" ]; then
+            echo "Loop guard skipped — non-CI trigger (run_id=0)"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           COMMIT_MSG=$(gh api "repos/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}" \
             --jq '.head_commit.message // ""')
           COMMIT_AUTHOR=$(gh api "repos/${TARGET_REPO}/actions/runs/${TARGET_RUN_ID}" \
@@ -216,9 +285,10 @@ jobs:
         shell: bash
         run: |
           case "${{ inputs.task_type }}" in
-            fix-sentry-issue) echo "file=cto-agent/prompts/fix-sentry-issue.md" >> "$GITHUB_OUTPUT" ;;
-            fix-e2e-failure)  echo "file=cto-agent/prompts/fix-e2e-failure.md"  >> "$GITHUB_OUTPUT" ;;
-            *)                echo "file=cto-agent/prompts/fix-ci-failure.md"   >> "$GITHUB_OUTPUT" ;;
+            fix-sentry-issue) echo "file=cto-agent/prompts/fix-sentry-issue.md"  >> "$GITHUB_OUTPUT" ;;
+            fix-e2e-failure)  echo "file=cto-agent/prompts/fix-e2e-failure.md"   >> "$GITHUB_OUTPUT" ;;
+            generate-tests)   echo "file=cto-agent/prompts/generate-tests.md"    >> "$GITHUB_OUTPUT" ;;
+            *)                echo "file=cto-agent/prompts/fix-ci-failure.md"    >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Set Sentry fix env vars
@@ -243,6 +313,17 @@ jobs:
           {
             printf 'E2E_TEST_FILE<<GH_EOF\n%s\nGH_EOF\n'     "${E2E_TEST_FILE}"
             printf 'E2E_ERROR_MESSAGE<<GH_EOF\n%s\nGH_EOF\n' "${E2E_ERROR_MESSAGE}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set generate-tests env vars
+        if: steps.loop-guard.outputs.skip != 'true' && steps.escalation-check.outputs.escalate_only != 'true' && inputs.task_type == 'generate-tests'
+        env:
+          UNCOVERED_FILE: ${{ inputs.uncovered_file }}
+          COVERAGE_PCT: ${{ inputs.coverage_pct }}
+        run: |
+          {
+            printf 'UNCOVERED_FILE<<GH_EOF\n%s\nGH_EOF\n' "${UNCOVERED_FILE}"
+            printf 'COVERAGE_PCT<<GH_EOF\n%s\nGH_EOF\n'   "${COVERAGE_PCT}"
           } >> "$GITHUB_ENV"
 
       # ── Apply Fix: Claude Code ──────────────────────────────────

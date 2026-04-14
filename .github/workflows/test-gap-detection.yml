@@ -1,0 +1,121 @@
+name: Test Gap Detection
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 6 AM UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  coverage-storscale-agents:
+    name: Coverage — storscale-agents
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout storscale-agents
+        uses: actions/checkout@v4
+        with:
+          repository: StorScale-AI/storscale-agents
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest coverage
+        run: npx vitest run --coverage --reporter=json 2>/dev/null || true
+
+      - name: Post coverage to CTO agent
+        if: hashFiles('coverage/coverage-final.json') != ''
+        env:
+          CTO_API_URL: https://cto-agent-monitor.onrender.com
+          CTO_API_KEY: ${{ secrets.CTO_API_KEY }}
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from 'fs';
+          const raw = JSON.parse(fs.readFileSync('coverage/coverage-final.json', 'utf8'));
+          const cwd = process.cwd();
+          const entries = Object.entries(raw).map(([absPath, data]) => {
+            const file = absPath.replace(cwd + '/', '');
+            const statements = Object.values(data.s ?? {});
+            const covered = statements.filter(v => Number(v) > 0).length;
+            const total = statements.length;
+            const linePct = total > 0 ? Math.round((covered / total) * 100) : 100;
+            return { file, linePct };
+          });
+          const payload = JSON.stringify({
+            repo: 'StorScale-AI/storscale-agents',
+            coverage: entries,
+          });
+          const res = await fetch(`${process.env.CTO_API_URL}/api/coverage-gaps`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.CTO_API_KEY}`,
+            },
+            body: payload,
+          });
+          const json = await res.json();
+          console.log('Coverage gap report:', JSON.stringify(json));
+          EOF
+
+  coverage-storscale-dashboard:
+    name: Coverage — storscale-dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout storscale-website (dashboard)
+        uses: actions/checkout@v4
+        with:
+          repository: StorScale-AI/storscale-website
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest coverage
+        run: npx vitest run --coverage --reporter=json 2>/dev/null || true
+
+      - name: Post coverage to CTO agent
+        if: hashFiles('coverage/coverage-final.json') != ''
+        env:
+          CTO_API_URL: https://cto-agent-monitor.onrender.com
+          CTO_API_KEY: ${{ secrets.CTO_API_KEY }}
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from 'fs';
+          const raw = JSON.parse(fs.readFileSync('coverage/coverage-final.json', 'utf8'));
+          const cwd = process.cwd();
+          const entries = Object.entries(raw).map(([absPath, data]) => {
+            const file = absPath.replace(cwd + '/', '');
+            const statements = Object.values(data.s ?? {});
+            const covered = statements.filter(v => Number(v) > 0).length;
+            const total = statements.length;
+            const linePct = total > 0 ? Math.round((covered / total) * 100) : 100;
+            return { file, linePct };
+          });
+          const payload = JSON.stringify({
+            repo: 'StorScale-AI/storscale-website',
+            coverage: entries,
+          });
+          const res = await fetch(`${process.env.CTO_API_URL}/api/coverage-gaps`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.CTO_API_KEY}`,
+            },
+            body: payload,
+          });
+          const json = await res.json();
+          console.log('Coverage gap report:', JSON.stringify(json));
+          EOF
