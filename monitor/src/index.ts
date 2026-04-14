@@ -16,6 +16,7 @@ import { pollAttio } from './pollers/attio.js';
 import { pollLiveness } from './pollers/liveness.js';
 import { createSentryPoller } from './pollers/sentry.js';
 import { createSyntheticChecksPoller } from './pollers/synthetic-checks.js';
+import { coverageRoutes } from './routes/coverage.js';
 import { healthRoutes } from './health-api.js';
 import { loadDispatchState } from './dispatch.js';
 import { Dispatcher } from './lib/dispatch-v2.js';
@@ -69,6 +70,9 @@ async function startPollers() {
 
   // Dispatcher instance shared by v2 pollers (rate-limited, dedup-aware)
   const dispatcher = new Dispatcher();
+
+  // Coverage gap reporting endpoint — called by test-gap-detection.yml
+  coverageRoutes(app, dispatcher);
 
   // T2.10: Load persisted state from Supabase before polling
   await Promise.allSettled([
