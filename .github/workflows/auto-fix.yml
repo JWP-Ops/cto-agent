@@ -18,7 +18,7 @@ on:
         default: 'unknown'
         type: string
       task_type:
-        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch'
+        description: 'Type of fix: fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch | update-docs'
         required: false
         default: 'fix-ci-failure'
         type: string
@@ -115,7 +115,7 @@ on:
         default: 'manual'
         type: string
       task_type:
-        description: 'fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch'
+        description: 'fix-ci-failure | fix-sentry-issue | fix-e2e-failure | generate-tests | fix-deploy-failure | dep-patch | update-docs'
         required: false
         default: 'fix-ci-failure'
         type: string
@@ -354,6 +354,7 @@ jobs:
             generate-tests)     echo "file=cto-agent/prompts/generate-tests.md"      >> "$GITHUB_OUTPUT" ;;
             fix-deploy-failure) echo "file=cto-agent/prompts/fix-deploy-failure.md"  >> "$GITHUB_OUTPUT" ;;
             dep-patch)          echo "file=cto-agent/prompts/fix-vulnerability.md"   >> "$GITHUB_OUTPUT" ;;
+            update-docs)        echo "file=cto-agent/prompts/update-docs.md"         >> "$GITHUB_OUTPUT" ;;
             *)                  echo "file=cto-agent/prompts/fix-ci-failure.md"      >> "$GITHUB_OUTPUT" ;;
           esac
 

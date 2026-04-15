@@ -1,0 +1,72 @@
+name: Update Documentation
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC (4am CST)
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this doc update is being triggered manually'
+        required: false
+        default: 'manual trigger'
+        type: string
+
+concurrency:
+  group: update-docs
+  cancel-in-progress: false
+
+jobs:
+  update-developer-site:
+    name: Update developer.storscale.ai
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch auto-fix to update developer site
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh workflow run auto-fix.yml \
+            --repo JWP-Ops/cto-agent \
+            --field repo=StorScale-AI/storscale-dashboard \
+            --field task_type=update-docs \
+            --field run_id=0 \
+            --field workflow_name=update-docs
+
+          echo "Dispatched update-docs to auto-fix.yml targeting StorScale-AI/storscale-dashboard"
+          echo "A PR will be opened on storscale-dashboard for review."
+
+  update-notion:
+    name: Update Notion context pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout CTO agent (capability source)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+
+      - name: Update Notion context pages via Claude Code
+        uses: anthropics/claude-code-action@d3a8d1736a61af74bee88bcac0182c49be969839 # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt_file: prompts/notion-update-docs.md
+          # mcp__notion__* is a Claude CLI prefix pattern, not a shell glob — expands to all Notion MCP tools at runtime
+          claude_args: '--allowedTools Read,Glob,Grep,mcp__notion__* --max-turns 20'
+          mcp_config: |
+            {
+              "mcpServers": {
+                "notion": {
+                  "command": "npx",
+                  "args": ["-y", "@notionhq/notion-mcp-server"],
+                  "env": {
+                    "NOTION_API_KEY": "${{ secrets.NOTION_API_KEY }}"
+                  }
+                }
+              }
+            }
