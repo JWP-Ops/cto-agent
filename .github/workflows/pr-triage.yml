@@ -36,7 +36,7 @@ jobs:
       has_exclusions: ${{ steps.classify.outputs.has_exclusions }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -198,8 +198,8 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
               merge_method: 'squash',
-              commit_title: pr.data.title,
-              commit_message: `Auto-merged by CTO Agent (risk:routine, all CI passing)`,
+              commit_title: `Auto-merged by CTO Agent: ${pr.data.title}`,
+              commit_message: `risk:routine — all CI checks passing`,
             });
 
             console.log(`Auto-merged PR #${context.payload.pull_request.number}: ${pr.data.title}`);
