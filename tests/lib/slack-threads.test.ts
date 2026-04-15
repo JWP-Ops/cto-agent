@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../monitor/src/lib/env.js', () => ({
-  optionalEnv: vi.fn(),
-}));
-vi.mock('../../monitor/src/lib/logger.js', () => ({ log: vi.fn() }));
-vi.mock('../../monitor/src/slack.js', () => ({ sendAlert: vi.fn().mockResolvedValue(true) }));
-
 let sendThreadedAlert: typeof import('../../monitor/src/lib/slack-threads.js').sendThreadedAlert;
 let getOpenThreadCount: typeof import('../../monitor/src/lib/slack-threads.js').getOpenThreadCount;
 let evictStaleThreads: typeof import('../../monitor/src/lib/slack-threads.js').evictStaleThreads;
@@ -22,7 +16,10 @@ describe('slack-threads', () => {
       optionalEnv: vi.fn(),
     }));
     vi.doMock('../../monitor/src/lib/logger.js', () => ({ log: vi.fn() }));
-    vi.doMock('../../monitor/src/slack.js', () => ({ sendAlert: vi.fn().mockResolvedValue(true) }));
+    vi.doMock('../../monitor/src/slack.js', () => ({
+      sendAlert: vi.fn().mockResolvedValue(true),
+      SEVERITY_COLORS: { success: '#36a64f', warning: '#daa038', danger: '#cc0000' },
+    }));
 
     const envMod = await import('../../monitor/src/lib/env.js');
     optionalEnvMock = envMod.optionalEnv as ReturnType<typeof vi.fn>;

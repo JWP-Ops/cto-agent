@@ -1,14 +1,13 @@
 import { optionalEnv } from './env.js';
 import { log } from './logger.js';
-import { sendAlert } from '../slack.js';
-
-type AlertSeverity = 'success' | 'warning' | 'danger';
+import { sendAlert, AlertSeverity, SEVERITY_COLORS } from '../slack.js';
 
 export interface ThreadedAlert {
   severity: AlertSeverity;
   title: string;
   message: string;
   fields?: Array<{ title: string; value: string; short?: boolean }>;
+  link?: { url: string; text: string };
 }
 
 interface ThreadRecord {
@@ -18,11 +17,6 @@ interface ThreadRecord {
 }
 
 const THREAD_TTL_MS = 24 * 60 * 60 * 1000;
-const SEVERITY_COLORS: Record<AlertSeverity, string> = {
-  success: '#36a64f',
-  warning: '#daa038',
-  danger: '#cc0000',
-};
 
 const threads = new Map<string, ThreadRecord>();
 
@@ -152,6 +146,14 @@ function buildAttachment(alert: ThreadedAlert): Record<string, unknown> {
       value: f.value,
       short: f.short ?? true,
     }));
+  }
+
+  if (alert.link) {
+    attachment.actions = [{
+      type: 'button',
+      text: alert.link.text,
+      url: alert.link.url,
+    }];
   }
 
   return attachment;
