@@ -56,6 +56,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt_file: prompts/notion-update-docs.md
+          # mcp__notion__* is a Claude CLI prefix pattern, not a shell glob — expands to all Notion MCP tools at runtime
           claude_args: '--allowedTools Read,Glob,Grep,mcp__notion__* --max-turns 20'
           mcp_config: |
             {

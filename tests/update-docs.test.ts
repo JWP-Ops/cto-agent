@@ -59,7 +59,7 @@ describe('update-docs workflow', () => {
     const job = jobs['update-developer-site'] as Record<string, unknown>;
     const steps = job['steps'] as Array<Record<string, unknown>>;
     const dispatchStep = steps.find(s =>
-      typeof s['run'] === 'string' && s['run'].includes('update-docs')
+      typeof s['run'] === 'string' && s['run'].includes('task_type=update-docs')
     );
     expect(dispatchStep).toBeDefined();
   });
