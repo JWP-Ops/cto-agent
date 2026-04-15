@@ -1,6 +1,7 @@
 import { optionalEnv } from './env.js';
 import { log } from './logger.js';
 import { DedupStore } from './dedup.js';
+import { recordDispatchCost } from '../cost-tracker.js';
 
 export type DispatchCategory = 'ci-fix' | 'sentry-fix' | 'e2e-fix' | 'test-gen' | 'dep-patch' | 'docs';
 
@@ -124,6 +125,7 @@ export class Dispatcher {
         // Record successful dispatch
         this.dailyCount++;
         this.recordCategory(req.category);
+        recordDispatchCost(req.category);
         if (req.dedupeId) {
           this.dedup.add(req.dedupeId);
         }
