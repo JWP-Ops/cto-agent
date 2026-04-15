@@ -11,6 +11,22 @@ Monitors GitHub CI, Render deploys, Stripe webhooks, Supabase, Vercel, Cloudflar
 - **prompts/** — Claude Code system prompts for novel failure analysis
 - **caller-template/** — Thin workflow YAML to copy into each monitored repo
 
+## Routines (M4 — Ambient Ops)
+
+Three Claude Code Routines run on Anthropic-managed cloud infrastructure (not Render). They complement the monitor — the monitor handles real-time polling, Routines handle low-frequency ambient tasks.
+
+| Routine | Trigger | Prompt |
+|---------|---------|--------|
+| Nightly PR Digest | Scheduled — 9 PM CST | `prompts/routines/nightly-pr-digest.md` |
+| Issue Triage | GitHub webhook: `issues.opened` | `prompts/routines/issue-triage.md` |
+| Release Changelog | GitHub webhook: `release.created` | `prompts/routines/release-changelog.md` |
+
+**Run budget:** Max plan = 15 runs/day. These 3 Routines use ≤ 3-5/day in practice.
+
+**To reconfigure a Routine:** Edit the prompt file in `prompts/routines/`, then update the Routine's prompt in Claude Code web (claude.ai/code → Routines tab).
+
+**Why not replace the monitor?** Routines have an hourly minimum schedule — too slow for the 2-min deploy failure detection and 5-min CI polling the monitor does. Use both.
+
 ## Stack
 - TypeScript, ESM (`"type": "module"`)
 - Vitest for testing
