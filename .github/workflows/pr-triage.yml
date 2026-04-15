@@ -1,0 +1,205 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CTO Agent — PR Risk Triage + Auto-Merge
+#
+# Triage job: applies risk:routine / risk:moderate / risk:high label.
+# Auto-merge job: for risk:routine PRs with no hard exclusions, waits 30 min
+# then merges if CI is still passing.
+#
+# Hard exclusions (never auto-merge): supabase/*.sql, **/migrations/**,
+#   **/auth/**, **/billing/**
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: PR Risk Triage
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    paths-ignore:
+      - '.github/workflows/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: Triage
+    runs-on: ubuntu-latest
+    outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+      has_exclusions: ${{ steps.classify.outputs.has_exclusions }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: files
+        run: |
+          FILES=$(git diff --name-only origin/main...HEAD)
+          COUNT=$(echo "$FILES" | grep -c '.' || echo 0)
+          echo "list<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Classify PR risk
+        id: classify
+        env:
+          FILES: ${{ steps.files.outputs.list }}
+          COUNT: ${{ steps.files.outputs.count }}
+        run: |
+          # ── Hard exclusions — always block auto-merge ──────────────────────
+          HAS_EXCLUSIONS=false
+          if echo "$FILES" | grep -qE '(supabase/.*\.sql|/migrations/|/auth/|/billing/)'; then
+            HAS_EXCLUSIONS=true
+          fi
+          echo "has_exclusions=${HAS_EXCLUSIONS}" >> "$GITHUB_OUTPUT"
+
+          # ── Risk classification ───────────────────────────────────────────
+          RISK="routine"
+
+          # HIGH: migrations/auth/billing paths, RLS/policy files, >10 files
+          if echo "$FILES" | grep -qE '(supabase/.*\.sql|/migrations/|/auth/|/billing/|rls|_policy|_policies)'; then
+            RISK="high"
+          elif [ "${COUNT:-0}" -gt 10 ]; then
+            RISK="high"
+          fi
+
+          # MODERATE: source files changed (monitor/src/, patterns/) but not HIGH
+          if [ "$RISK" = "routine" ]; then
+            NON_ROUTINE=$(echo "$FILES" \
+              | grep -cvE '^(tests/|docs/|prompts/|CLAUDE\.md|\.github/|[^/]+\.md$|tsconfig|vitest\.config|render\.yaml)' \
+              || true)
+            if [ "${NON_ROUTINE:-0}" -gt 0 ]; then
+              RISK="moderate"
+            fi
+          fi
+
+          echo "risk=${RISK}" >> "$GITHUB_OUTPUT"
+          echo "PR classified as risk:${RISK} (exclusions=${HAS_EXCLUSIONS}, files=${COUNT})"
+
+      - name: Apply risk label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RISK="${{ steps.classify.outputs.risk }}"
+          # Remove any existing risk labels first
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --remove-label "risk:routine" \
+            --remove-label "risk:moderate" \
+            --remove-label "risk:high" \
+            --repo "${{ github.repository }}" 2>/dev/null || true
+          # Apply new label
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --add-label "risk:${RISK}" \
+            --repo "${{ github.repository }}"
+
+      - name: Request review for high-risk PRs
+        if: steps.classify.outputs.risk == 'high'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEWER: ${{ vars.REVIEWER_USERNAME }}
+        run: |
+          if [ -n "$REVIEWER" ]; then
+            gh pr edit ${{ github.event.pull_request.number }} \
+              --add-reviewer "$REVIEWER" \
+              --repo "${{ github.repository }}" 2>/dev/null || true
+          fi
+
+  auto-merge:
+    name: Auto-Merge
+    needs: triage
+    if: |
+      needs.triage.outputs.risk == 'routine' &&
+      needs.triage.outputs.has_exclusions == 'false'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify Slack — auto-merge pending
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -s -o /dev/null -X POST "$SLACK_WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d "{\"text\":\"CTO Agent: Auto-merging *${PR_TITLE}* in 30 min — add \`no-auto-merge\` label or close the PR to cancel. <${PR_URL}|View PR>\"}"
+          fi
+
+      - name: Wait 30 minutes
+        run: sleep 1800
+
+      - name: Check CI status and merge if passing
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+
+            // Abort if PR is no longer open
+            if (pr.data.state !== 'open') {
+              console.log(`PR is ${pr.data.state} — skipping auto-merge`);
+              return;
+            }
+
+            // Abort if no-auto-merge label was added during the wait
+            const labels = pr.data.labels.map(l => l.name);
+            if (labels.includes('no-auto-merge')) {
+              console.log('no-auto-merge label present — skipping auto-merge');
+              return;
+            }
+
+            // Check all CI check runs for the PR head commit
+            const { data: checksData } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: pr.data.head.sha,
+            });
+
+            // Exclude this workflow's own jobs from the CI gate
+            const ciChecks = checksData.check_runs.filter(r =>
+              r.name !== 'Triage' && r.name !== 'Auto-Merge'
+            );
+
+            if (ciChecks.length === 0) {
+              core.setFailed('No CI checks found — refusing to auto-merge without evidence of passing tests');
+              return;
+            }
+
+            const allPassed = ciChecks.every(r =>
+              r.status === 'completed' && r.conclusion === 'success'
+            );
+
+            if (!allPassed) {
+              const failing = ciChecks
+                .filter(r => r.conclusion !== 'success')
+                .map(r => `${r.name}: ${r.conclusion ?? r.status}`)
+                .join(', ');
+              core.setFailed(`CI not all passing — skipping auto-merge. Failing: ${failing}`);
+              return;
+            }
+
+            // All checks pass — merge
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              merge_method: 'squash',
+              commit_title: pr.data.title,
+              commit_message: `Auto-merged by CTO Agent (risk:routine, all CI passing)`,
+            });
+
+            console.log(`Auto-merged PR #${context.payload.pull_request.number}: ${pr.data.title}`);
