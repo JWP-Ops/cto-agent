@@ -1,9 +1,9 @@
 import { optionalEnv } from './lib/env.js';
 import { log } from './lib/logger.js';
 
-type AlertSeverity = 'success' | 'warning' | 'danger';
+export type AlertSeverity = 'success' | 'warning' | 'danger';
 
-const SEVERITY_COLORS: Record<AlertSeverity, string> = {
+export const SEVERITY_COLORS: Record<AlertSeverity, string> = {
   success: '#36a64f',
   warning: '#daa038',
   danger: '#cc0000',

@@ -63,3 +63,55 @@ export function getDailyCostSummary(): { spend: number; runs: number; budget: nu
   const budget = budgetStr ? parseFloat(budgetStr) : 25;
   return { spend: dailySpend, runs: dailyRunCount, budget };
 }
+
+// ── Weekly cost tracking (rolling 7-day window) ─────────────────────────────
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface CostRecord {
+  category: string;
+  timestamp: number;
+  estimatedCost: number;
+}
+
+// Exported for testing
+export const _weeklyHistory: CostRecord[] = [];
+
+function evictOldRecords(): void {
+  const cutoff = Date.now() - WEEK_MS;
+  while (_weeklyHistory.length > 0 && _weeklyHistory[0].timestamp < cutoff) {
+    _weeklyHistory.shift();
+  }
+}
+
+/**
+ * Record a dispatch cost for a given category (called from Dispatcher on success).
+ */
+export function recordDispatchCost(category: string): void {
+  evictOldRecords();
+  _weeklyHistory.push({
+    category,
+    timestamp: Date.now(),
+    estimatedCost: ESTIMATED_COST_PER_RUN,
+  });
+}
+
+/**
+ * Returns total cost per dispatch category for the rolling 7-day window.
+ */
+export function getWeeklyCostByCategory(): Map<string, number> {
+  evictOldRecords();
+  const result = new Map<string, number>();
+  for (const record of _weeklyHistory) {
+    result.set(record.category, (result.get(record.category) ?? 0) + record.estimatedCost);
+  }
+  return result;
+}
+
+/**
+ * Returns total estimated spend across all categories for the past 7 days.
+ */
+export function getWeeklyTotalCost(): number {
+  evictOldRecords();
+  return _weeklyHistory.reduce((sum, r) => sum + r.estimatedCost, 0);
+}
