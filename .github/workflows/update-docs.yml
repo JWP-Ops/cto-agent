@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: update-docs
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   update-developer-site:
@@ -48,6 +48,8 @@ jobs:
     steps:
       - name: Checkout CTO agent (capability source)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
 
       - name: Update Notion context pages via Claude Code
         uses: anthropics/claude-code-action@d3a8d1736a61af74bee88bcac0182c49be969839 # v1
@@ -62,7 +64,7 @@ jobs:
                   "command": "npx",
                   "args": ["-y", "@notionhq/notion-mcp-server"],
                   "env": {
-                    "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer ${{ secrets.NOTION_API_KEY }}\"}"
+                    "NOTION_API_KEY": "${{ secrets.NOTION_API_KEY }}"
                   }
                 }
               }
