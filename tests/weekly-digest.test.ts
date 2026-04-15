@@ -20,6 +20,7 @@ let sendAlertMock: ReturnType<typeof vi.fn>;
 describe('sendWeeklyDigest', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     vi.resetModules();
 
     vi.doMock('../monitor/src/lib/logger.js', () => ({ log: vi.fn() }));

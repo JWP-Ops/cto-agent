@@ -143,7 +143,7 @@ async function buildRiskSummary(
     try {
       const since = oneWeekAgo.split('T')[0];
       const res = await fetch(
-        `https://api.github.com/search/issues?q=label:risk:high+is:pr+org:StorScale-AI+created:>=${since}&per_page=10`,
+        `https://api.github.com/search/issues?q=label%3A%22risk%3Ahigh%22+is:pr+org:StorScale-AI+created:>=${since}&per_page=10`,
         {
           headers: {
             Authorization: `Bearer ${githubPat}`,
