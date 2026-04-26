@@ -1,19 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import yaml from 'js-yaml';
 
 /**
  * BL-077 — Regression test.
  *
- * GitHub Actions reusable-workflow inputs are strictly typed. The reusable
- * `auto-fix.yml` declares `run_id: type: string`. The expression
- * `${{ github.event.workflow_run.id }}` evaluates to a NUMBER on the
- * `workflow_run` event payload, so passing it bare to a string-typed input
- * causes the caller workflow to fail with `startup_failure` before any step
- * runs — the auto-fix never triggers and we silently lose CI safety net coverage.
+ * The cto-auto-fix.yml caller has TWO failure modes that both produce silent
+ * `startup_failure` runs (no logs, no jobs, no annotations) at the
+ * workflow_call boundary. Both must be present for the auto-fix path to work.
  *
- * Fix: wrap with `format('{0}', ...)` (only stringify built-in available in
- * GH Actions expressions). This test is the regression guard.
+ * 1. Type coercion: GH Actions reusable-workflow inputs are strictly typed.
+ *    auto-fix.yml declares `run_id: type:string`, but
+ *    `${{ github.event.workflow_run.id }}` evaluates to a NUMBER on
+ *    workflow_run events. Passing it bare causes startup_failure.
+ *    Fix: wrap with `format('{0}', ...)`.
+ *
+ * 2. Permissions: auto-fix.yml's job requests `pull-requests: write` (it
+ *    creates PRs for novel fixes). A reusable workflow cannot request more
+ *    permissions than the caller grants. The caller MUST grant
+ *    `pull-requests: write` at the workflow level or startup_failure fires
+ *    with: "The nested job 'auto-fix' is requesting 'pull-requests: write',
+ *    but is only allowed 'pull-requests: none'."
+ *
+ * This test is the regression guard for both.
  */
 
 const REPO_ROOT = join(__dirname, '..');
@@ -41,6 +51,24 @@ export function findUncoercedRunIdReferences(yamlText: string): CoercionIssue[] 
     issues.push({ line: i + 1, raw: line.trim() });
   }
   return issues;
+}
+
+/**
+ * Returns true if the workflow YAML grants `pull-requests: write` at the
+ * workflow level. The reusable `auto-fix.yml` requests this at the job level,
+ * so the caller must grant at least this much or workflow_call fails with
+ * startup_failure.
+ */
+export function hasPullRequestsWritePermission(yamlText: string): boolean {
+  const parsed = yaml.load(yamlText) as Record<string, unknown> | null;
+  if (!parsed || typeof parsed !== 'object') return false;
+  const permissions = (parsed as { permissions?: Record<string, string> | string }).permissions;
+  if (!permissions) return false;
+  if (typeof permissions === 'string') {
+    // 'write-all' grants every scope; 'read-all' / 'none' do not include pr:write.
+    return permissions === 'write-all';
+  }
+  return permissions['pull-requests'] === 'write';
 }
 
 describe('BL-077: workflow_run.id type coercion at workflow_call boundary', () => {
@@ -74,6 +102,53 @@ describe('BL-077: workflow_run.id type coercion at workflow_call boundary', () =
       const yamlText = readFileSync(path, 'utf8');
       const issues = findUncoercedRunIdReferences(yamlText);
       expect(issues, `Uncoerced github.event.workflow_run.id in ${path}: ${JSON.stringify(issues)}`).toEqual([]);
+    });
+  }
+});
+
+describe('BL-077: caller workflow grants pull-requests: write permission', () => {
+  it('detects missing pull-requests permission', () => {
+    const sample = [
+      'permissions:',
+      '  contents: write',
+      '  id-token: write',
+    ].join('\n');
+    expect(hasPullRequestsWritePermission(sample)).toBe(false);
+  });
+
+  it('accepts pull-requests: write at workflow level', () => {
+    const sample = [
+      'permissions:',
+      '  contents: write',
+      '  pull-requests: write',
+      '  id-token: write',
+    ].join('\n');
+    expect(hasPullRequestsWritePermission(sample)).toBe(true);
+  });
+
+  it('accepts top-level write-all shorthand', () => {
+    expect(hasPullRequestsWritePermission('permissions: write-all')).toBe(true);
+  });
+
+  it('rejects top-level read-all shorthand', () => {
+    expect(hasPullRequestsWritePermission('permissions: read-all')).toBe(false);
+  });
+
+  it('rejects pull-requests: read', () => {
+    const sample = [
+      'permissions:',
+      '  pull-requests: read',
+    ].join('\n');
+    expect(hasPullRequestsWritePermission(sample)).toBe(false);
+  });
+
+  for (const path of CALLER_TEMPLATES) {
+    it(`caller-template at ${path.replace(REPO_ROOT + '/', '')} grants pull-requests: write`, () => {
+      if (!existsSync(path)) {
+        throw new Error(`Expected caller-template file at ${path} (BL-077 dependency)`);
+      }
+      const yamlText = readFileSync(path, 'utf8');
+      expect(hasPullRequestsWritePermission(yamlText), `Missing pull-requests: write in ${path}`).toBe(true);
     });
   }
 });
