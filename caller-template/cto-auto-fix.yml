@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write  # BL-077: reusable auto-fix.yml opens PRs for novel fixes; without this the workflow_call boundary rejects with startup_failure
   id-token: write
   actions: read
 
