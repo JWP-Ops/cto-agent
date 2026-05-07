@@ -3,3 +3,11 @@ dist/
 .env
 *.log
 coverage/
+
+# graphify knowledge graph (local build output)
+graphify-out/
+
+# Claude Code session artifacts
+.claude/settings.local.json
+.superpowers/
+.worktrees/
